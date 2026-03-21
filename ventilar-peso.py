@@ -1,42 +1,74 @@
 from machine import Pin, PWM, time_pulse_us
 import time
-import gc  # Recolector de basura para liberar memoria
+import gc
 
-# Pines
+# =====================================================================
+#  LEVITACIÓN DE PELOTA — Control Difuso PID (Fuzzy PD + Integral)
+#  Para pelota de icopor ~0.5 g en tubo con ventilador 12 V / ESP32
+# =====================================================================
+#
+#  Mejoras clave respecto a la versión anterior (solo Fuzzy PD):
+#
+#  1. INTEGRAL con anti-windup  →  elimina error en estado estable.
+#     Sin integral, el PWM nunca converge al valor exacto que sostiene
+#     la pelota en el setpoint; siempre queda un offset residual.
+#
+#  2. SIN zona muerta  →  la zona muerta impedía corregir errores
+#     pequeños. Ahora el sistema fuzzy + integral se encarga de todo.
+#
+#  3. dt real medido  →  la derivada y la integral usan el tiempo
+#     real transcurrido, no un DT fijo que puede ser inexacto.
+#
+#  4. Rechazo de outliers en el sensor  →  lecturas que difieren
+#     demasiado de la mediana actual se descartan.
+#
+#  5. Limitador de cambio adaptativo  →  permite correcciones rápidas
+#     cuando la pelota está lejos, pero finas cuando está cerca.
+#
+#  6. Compensación de tiempo de loop  →  el sleep se ajusta para
+#     mantener la frecuencia objetivo de 20 Hz.
+# =====================================================================
+
+# ---- Pines ----
 TRIG_PIN = 27
 ECHO_PIN = 26
 FAN_PIN  = 14
 
 trig = Pin(TRIG_PIN, Pin.OUT)
 echo = Pin(ECHO_PIN, Pin.IN)
-fan = PWM(Pin(FAN_PIN), freq=25000, duty=0)
+fan  = PWM(Pin(FAN_PIN), freq=25000, duty=0)
 
-# Variables de control
-DT = 0.05  # 20 Hz (Súper rápido para atrapar caídas)
-PWM_MAX = 900
-PWM_MIN = 80   # Reducido para que la pelota liviana pueda descender al setpoint
-ALFA_PWM = 0.65     # Suavizado más responsivo (65% nuevo, 35% anterior)
-ALFA_DERIV = 0.30   # Filtro de derivada con más suavizado para estabilidad
-ZONA_MUERTA = 0.5   # Zona de tolerancia más fina (cm)
-UMBRAL_DERIV = 2.0   # Reaccionar antes al movimiento de la pelota (cm/s)
-MAX_CAMBIO = 6.0     # Límite de cambio de PWM por ciclo (evita saltos bruscos)
-MAX_LECTURAS_INV = 10  # Máximo de lecturas inválidas consecutivas antes de parar
+# ---- Parámetros del controlador ----
+DT_TARGET = 0.05        # Período objetivo del loop (20 Hz)
+PWM_MAX   = 900
+PWM_MIN   = 80
+
+# Sensor
+SENSOR_MIN  = 3.0       # Distancia mínima válida (cm)
+SENSOR_MAX  = 40.0      # Distancia máxima válida (cm)
+BUF_SIZE    = 7          # Tamaño del búfer de mediana
+OUTLIER_THR = 5.0        # Umbral para rechazar outliers (cm)
+MAX_LECTURAS_INV = 10    # Lecturas inválidas antes de parar
+
+# Filtros
+ALFA_DERIV = 0.35        # EMA de derivada (0 = todo anterior, 1 = todo nuevo)
+ALFA_PWM   = 0.70        # EMA de PWM (responsivo pero sin saltos)
+
+# Integral (la pieza clave que faltaba)
+KI             = 0.12    # Ganancia integral — pequeña pero persistente
+INTEGRAL_MAX   = 40.0    # Límite anti-windup (±)
+INTEGRAL_DECAY = 0.998   # Decaimiento leve para evitar acumulación infinita
+
+# Limitador de cambio adaptativo
+MAX_CAMBIO_CERCA = 4.0   # PWM/ciclo cuando |error| < UMBRAL_CERCA
+MAX_CAMBIO_LEJOS = 12.0  # PWM/ciclo cuando |error| >= UMBRAL_CERCA
+UMBRAL_CERCA     = 3.0   # cm
+
+# Logging
+MAX_LOGS = 1200          # ~60 s a 20 Hz
+
+# ---- Sensor ultrasónico con mediana + rechazo de outliers ----
 buf = []
-
-# --- GESTIÓN DE MEMORIA PARA EL CSV ---
-data_log = []
-MAX_LOGS = 1200  # Aprox 60 segundos de grabación. Evita el MemoryError.
-
-# --- FUNCIONES DE PERTENENCIA ---
-def trapmf(x, a, b, c, d):
-    if x <= a or x >= d: return 0.0
-    if a < x <= b: return (x - a) / (b - a) if b != a else 1.0
-    if b < x <= c: return 1.0
-    if c < x < d: return (d - x) / (d - c) if d != c else 1.0
-    return 0.0
-
-def trimf(x, a, b, c):
-    return trapmf(x, a, b, b, c)
 
 def medir_cm():
     global buf
@@ -45,163 +77,277 @@ def medir_cm():
     trig.on()
     time.sleep_us(10)
     trig.off()
-    dur = time_pulse_us(echo, 1, 30000)
-    if dur < 0: return -1.0 if not buf else round(sorted(buf)[len(buf)//2], 2)
-    d = dur * 0.034 / 2
-    if d < 3 or d > 40: return -1.0 if not buf else round(sorted(buf)[len(buf)//2], 2)
-    
-    # Búfer de 5 lecturas para mejor filtrado por mediana
-    buf.append(d)
-    if len(buf) > 5: buf.pop(0)
-    return round(sorted(buf)[len(buf)//2], 2)
 
-print("="*65)
-print("CONTROL DIFUSO - AJUSTE 'PESO PLUMA' (ICOPOR 0.5g)")
-print("="*65)
+    dur = time_pulse_us(echo, 1, 30000)
+
+    # Lectura fallida → devolver mediana del búfer (o -1 si vacío)
+    if dur < 0:
+        if buf:
+            return round(sorted(buf)[len(buf) // 2], 2)
+        return -1.0
+
+    d = dur * 0.034 / 2
+
+    if d < SENSOR_MIN or d > SENSOR_MAX:
+        if buf:
+            return round(sorted(buf)[len(buf) // 2], 2)
+        return -1.0
+
+    # Rechazo de outliers: si ya hay suficientes muestras, rechazar
+    # lecturas que se alejen demasiado de la mediana actual.
+    if len(buf) >= 3:
+        mediana = sorted(buf)[len(buf) // 2]
+        if abs(d - mediana) > OUTLIER_THR:
+            return round(mediana, 2)
+
+    buf.append(d)
+    if len(buf) > BUF_SIZE:
+        buf.pop(0)
+    return round(sorted(buf)[len(buf) // 2], 2)
+
+
+# ---- Funciones de pertenencia ----
+def trapmf(x, a, b, c, d):
+    """Trapezoidal: 0 fuera de [a,d], sube en [a,b], 1 en [b,c], baja en [c,d]."""
+    if x <= a or x >= d:
+        return 0.0
+    if a < x <= b:
+        return (x - a) / (b - a) if b != a else 1.0
+    if b < x <= c:
+        return 1.0
+    if c < x < d:
+        return (d - x) / (d - c) if d != c else 1.0
+    return 0.0
+
+def trimf(x, a, b, c):
+    """Triangular: pico en b."""
+    return trapmf(x, a, b, b, c)
+
+
+# ---- Deltas de PWM (singletons de salida) ----
+# Asimétricos: las correcciones hacia arriba son más fuertes porque
+# la gravedad ayuda a bajar pero se opone a subir.
+DELTA_NV = -10.0    # Frenar fuerte (pelota muy arriba + subiendo)
+DELTA_NB =  -5.0    # Bajar rápido
+DELTA_NM =  -2.5    # Bajar moderado
+DELTA_NS =  -1.0    # Ajuste fino hacia abajo
+DELTA_Z  =   0.0    # Mantener
+DELTA_PS =   1.5    # Ajuste fino hacia arriba
+DELTA_PM =   4.0    # Empujón moderado
+DELTA_PB =   8.0    # Subida rápida
+DELTA_PV =  20.0    # Rescate fuerte (pelota muy abajo + cayendo)
+
+# ---- Matriz FAM (Fuzzy Associative Memory) ----
+# Filas  = nivel de error    (9): NV NB NM NS Z PS PM PB PV
+# Columnas = nivel de derivada (7): NV NB NS Z  PS PB PV
+#
+# Convención de signos:
+#   error > 0  →  pelota ABAJO del setpoint  →  necesita MÁS fan
+#   error < 0  →  pelota ARRIBA del setpoint →  necesita MENOS fan
+#   deriv > 0  →  pelota CAYENDO (error crece) →  necesita MÁS fan
+#   deriv < 0  →  pelota SUBIENDO (error decrece) →  necesita MENOS fan
+#
+# Diseño:
+#   • Diagonal: error y derivada del mismo signo → corrección fuerte
+#   • Anti-diagonal: se oponen → corrección moderada (ya se auto-corrige)
+#   • Centro (Z,Z): DELTA_Z = 0 → la integral se encarga del fino
+#   • Filas NS/Z/PS: más entradas Z para amortiguar cerca del setpoint
+
+FAM = [
+    # dE:  NVd     NBd     NSd      Zd     PSd     PBd     PVd
+    [DELTA_NV, DELTA_NV, DELTA_NB, DELTA_NM, DELTA_NS, DELTA_Z,  DELTA_Z ],  # eNV: muy arriba
+    [DELTA_NV, DELTA_NB, DELTA_NM, DELTA_NS, DELTA_Z,  DELTA_Z,  DELTA_PS],  # eNB
+    [DELTA_NB, DELTA_NM, DELTA_NS, DELTA_NS, DELTA_Z,  DELTA_PS, DELTA_PM],  # eNM
+    [DELTA_NM, DELTA_NS, DELTA_NS, DELTA_Z,  DELTA_Z,  DELTA_PS, DELTA_PM],  # eNS
+    [DELTA_NM, DELTA_NS, DELTA_Z,  DELTA_Z,  DELTA_Z,  DELTA_PS, DELTA_PM],  # eZ  — triple Z central
+    [DELTA_NM, DELTA_NS, DELTA_Z,  DELTA_Z,  DELTA_PS, DELTA_PS, DELTA_PM],  # ePS
+    [DELTA_NM, DELTA_NS, DELTA_Z,  DELTA_PS, DELTA_PS, DELTA_PM, DELTA_PB],  # ePM
+    [DELTA_NS, DELTA_Z,  DELTA_Z,  DELTA_PS, DELTA_PM, DELTA_PB, DELTA_PV],  # ePB
+    [DELTA_Z,  DELTA_Z,  DELTA_PS, DELTA_PM, DELTA_PB, DELTA_PV, DELTA_PV],  # ePV: muy abajo
+]
+
+
+def fuzzificar_error(e):
+    """Convierte error (cm) en 9 grados de pertenencia."""
+    return [
+        trapmf(e, -50, -50, -12, -6),   # NV: muy arriba
+        trimf(e,  -10,  -6, -3),         # NB
+        trimf(e,   -5,  -3, -1),         # NM
+        trimf(e,   -2,  -1,  0),         # NS
+        trimf(e,   -1.5, 0,  1.5),       # Z : en el punto
+        trimf(e,    0,   1,  2),         # PS
+        trimf(e,    1,   3,  5),         # PM
+        trimf(e,    3,   6, 10),         # PB
+        trapmf(e,   6,  12, 50, 50),     # PV: muy abajo
+    ]
+
+def fuzzificar_derivada(de):
+    """Convierte derivada (cm/s) en 7 grados de pertenencia."""
+    return [
+        trapmf(de, -80, -80, -20,  -8),  # NV: subiendo muy rápido
+        trimf(de,  -15,  -8,  -3),        # NB: subiendo rápido
+        trimf(de,   -5,  -2,   0),        # NS: subiendo lento
+        trimf(de,   -1.5, 0,   1.5),      # Z : quieta
+        trimf(de,    0,   2,   5),        # PS: cayendo lento
+        trimf(de,    3,   8,  15),        # PB: cayendo rápido
+        trapmf(de,   8,  20,  80,  80),   # PV: cayendo en picada
+    ]
+
+def inferencia_fuzzy(error, derivada):
+    """Evalúa la FAM y retorna delta_pwm por defuzzificación Sugeno."""
+    e_niv = fuzzificar_error(error)
+    d_niv = fuzzificar_derivada(derivada)
+
+    num = 0.0
+    den = 0.0
+    for i in range(9):
+        ei = e_niv[i]
+        if ei <= 0:
+            continue
+        for j in range(7):
+            w = min(ei, d_niv[j])
+            if w > 0:
+                num += w * FAM[i][j]
+                den += w
+
+    return (num / den) if den > 0 else 0.0
+
+
+# ==================================================================
+#  INICIO
+# ==================================================================
+print("=" * 65)
+print("  FUZZY PID — Levitación de pelota (icopor 0.5 g)")
+print("  Fuzzy PD + Integral con anti-windup")
+print("=" * 65)
 
 try:
     setpoint = float(input("Setpoint (cm, ej 20): ").strip())
 except:
     setpoint = 20.0
+print("Setpoint: {} cm".format(setpoint))
 
-pwm_actual = 250.0  # Inicio bajo para pelota ultra-liviana (0.5g)
-error_ant = 0.0
-deriv_f = 0.0
-lecturas_invalidas = 0
+# Estado del controlador
+pwm_actual   = 250.0
+error_ant    = 0.0
+deriv_f      = 0.0
+integral     = 0.0           # ← NUEVO: acumulador integral
+lecturas_inv = 0
+data_log     = []
 
-# Arranque progresivo del ventilador (más suave para pelota liviana)
-print("Arranque progresivo...")
+# Arranque progresivo
+print("Arranque progresivo del ventilador...")
 p = 80
 while p < int(pwm_actual):
     fan.duty(p)
-    time.sleep(0.05)
+    time.sleep(0.04)
     p += 15
 fan.duty(int(pwm_actual))
 time.sleep(1)
 
-# =================================================================
-# DELTAS DE PWM: MODERADOS PARA CONTROL GRADUAL DE 0.5 GRAMOS
-# Deltas reducidos + suavizado responsivo + limitador de cambio
-# evitan que el ventilador se apague bruscamente y provoque caídas.
-# =================================================================
-NV_out = -8.0   # Freno fuerte pero controlado (era -15)
-NB_out = -5.0   # Bajar rápido (era -8)
-NM_out = -2.5   # Bajar moderado (era -3)
-NS_out = -1.0   # Ajuste fino hacia abajo
-Z_out  =  0.0   # MANTENER POTENCIA EXACTA
-PS_out =  1.5   # Ajuste fino hacia arriba
-PM_out =  4.0   # Empujón moderado
-PB_out =  8.0   # Subida rápida (era 10)
-PV_out = 18.0   # Rescate fuerte (era 25)
+t_inicio  = time.ticks_ms()
+t_anterior = time.ticks_ms()
+ciclos    = 0
+gc.collect()
 
-# Matriz FAM Asimétrica con más amortiguación central (Anti Yo-Yo)
-# Filas NS/Z/PS tienen más entradas Z para evitar sobre-correcciones
-FAM = [
-    [NV_out, NV_out, NB_out, NM_out, NS_out, Z_out,  Z_out ],  # NV: Muy arriba
-    [NV_out, NB_out, NM_out, NS_out, Z_out,  Z_out,  PS_out],  # NB
-    [NB_out, NM_out, NS_out, NS_out, Z_out,  PS_out, PM_out],  # NM
-    [NM_out, NS_out, NS_out, Z_out,  Z_out,  PS_out, PM_out],  # NS: Más Z para estabilidad
-    [NM_out, NS_out, Z_out,  Z_out,  Z_out,  PS_out, PM_out],  # Z: Triple Z central = estable
-    [NM_out, NS_out, Z_out,  Z_out,  PS_out, PS_out, PM_out],  # PS: Más Z para estabilidad
-    [NM_out, NS_out, Z_out,  PS_out, PS_out, PM_out, PB_out],  # PM
-    [NS_out, Z_out,  Z_out,  PS_out, PM_out, PB_out, PV_out],  # PB
-    [Z_out,  Z_out,  PS_out, PM_out, PB_out, PV_out, PV_out]   # PV: Muy abajo
-]
-
-t_inicio = time.ticks_ms()
-ciclos = 0 # Contador para limpieza de memoria
-
-gc.collect() # Limpieza inicial de RAM
+print("{:>7s} | {:>6s} | {:>7s} | {:>7s} | {:>7s} | {:>7s} | {:>7s}".format(
+    "t(s)", "Dist", "Error", "dErr", "Integ", "dPWM", "PWM"))
+print("-" * 70)
 
 try:
     while True:
+        # ---- Medir tiempo real transcurrido ----
+        t_ahora  = time.ticks_ms()
+        dt_real  = time.ticks_diff(t_ahora, t_anterior) / 1000.0
+        t_anterior = t_ahora
+
+        # Protección: evitar dt absurdos
+        if dt_real < 0.01:
+            dt_real = 0.01
+        elif dt_real > 0.5:
+            dt_real = 0.5
+
+        # ---- Lectura del sensor ----
         dist = medir_cm()
         if dist < 0:
-            lecturas_invalidas += 1
-            if lecturas_invalidas > MAX_LECTURAS_INV:
-                print("Demasiadas lecturas invalidas. Deteniendo por seguridad.")
+            lecturas_inv += 1
+            if lecturas_inv > MAX_LECTURAS_INV:
+                print("ERROR: Demasiadas lecturas inválidas. Deteniendo.")
                 break
-            time.sleep(DT)
+            time.sleep(DT_TARGET)
             continue
 
-        lecturas_invalidas = 0
-        tiempo_actual = time.ticks_diff(time.ticks_ms(), t_inicio) / 1000.0
+        lecturas_inv = 0
+        tiempo_seg = time.ticks_diff(t_ahora, t_inicio) / 1000.0
 
-        # 1. Error y Derivada con filtro mejorado
+        # ---- 1. ERROR ----
         error = dist - setpoint
-        deriv = (error - error_ant) / DT
-        deriv_f = ALFA_DERIV * deriv + (1 - ALFA_DERIV) * deriv_f
+
+        # ---- 2. DERIVADA (filtrada con EMA) ----
+        deriv_raw = (error - error_ant) / dt_real
+        deriv_f   = ALFA_DERIV * deriv_raw + (1.0 - ALFA_DERIV) * deriv_f
         error_ant = error
 
-        # 2. Zona muerta: si error pequeño Y pelota casi quieta, no corregir
-        if abs(error) < ZONA_MUERTA and abs(deriv_f) < UMBRAL_DERIV:
-            delta_pwm = 0.0
+        # ---- 3. INTEGRAL (con anti-windup y decay) ----
+        # Solo acumular cuando el error no es enorme (evita windup
+        # durante transitorios o cuando la pelota está fuera de rango).
+        if abs(error) < 10.0:
+            integral += error * dt_real
+            integral *= INTEGRAL_DECAY
+            # Anti-windup: limitar acumulación
+            if integral > INTEGRAL_MAX:
+                integral = INTEGRAL_MAX
+            elif integral < -INTEGRAL_MAX:
+                integral = -INTEGRAL_MAX
+
+        # ---- 4. INFERENCIA DIFUSA (PD) ----
+        delta_fuzzy = inferencia_fuzzy(error, deriv_f)
+
+        # ---- 5. CONTRIBUCIÓN INTEGRAL ----
+        delta_integral = KI * integral
+
+        # ---- 6. DELTA TOTAL ----
+        delta_pwm = delta_fuzzy + delta_integral
+
+        # ---- 7. LIMITADOR DE CAMBIO ADAPTATIVO ----
+        if abs(error) > UMBRAL_CERCA:
+            max_cambio = MAX_CAMBIO_LEJOS
         else:
-            # 3. Funciones de Error (Zona "Cero" ampliada a ±2 cm)
-            e_niveles = [
-                trapmf(error, -50, -50, -15, -8),  # NV: Muy arriba
-                trimf(error, -12, -8, -4),         # NB
-                trimf(error, -6, -4, -1.5),        # NM
-                trimf(error, -3.0, -1.0, 0),       # NS
-                trimf(error, -2.0, 0.0, 2.0),      # Z: Zona de confort (±2 cm)
-                trimf(error, 0, 1.0, 3.0),         # PS
-                trimf(error, 1.5, 4, 6),           # PM
-                trimf(error, 4, 8, 12),            # PB
-                trapmf(error, 8, 15, 50, 50)       # PV: Muy abajo
-            ]
+            max_cambio = MAX_CAMBIO_CERCA
+        delta_pwm = max(-max_cambio, min(max_cambio, delta_pwm))
 
-            # 4. Funciones de Derivada (Velocidad de la pelota, banda quieta más ancha)
-            de_niveles = [
-                trapmf(deriv_f, -80, -80, -25, -10), # Subiendo rapidísimo
-                trimf(deriv_f, -20, -10, -3),        # Subiendo rápido
-                trimf(deriv_f, -6, -3, 0),           # Subiendo lento
-                trimf(deriv_f, -2.0, 0, 2.0),        # Quieta (±2 cm/s)
-                trimf(deriv_f, 0, 3, 6),             # Cayendo lento
-                trimf(deriv_f, 3, 10, 20),           # Cayendo rápido
-                trapmf(deriv_f, 10, 25, 80, 80)      # Cayendo en picada
-            ]
-
-            # 5. Evaluación de Inferencia
-            numerador = 0.0
-            denominador = 0.0
-            for i in range(9):
-                for j in range(7):
-                    peso = min(e_niveles[i], de_niveles[j])
-                    if peso > 0:
-                        numerador += peso * FAM[i][j]
-                        denominador += peso
-
-            delta_pwm = (numerador / denominador) if denominador > 0 else 0.0
-
-        # 6. Aplicar con suavizado exponencial + limitador de cambio
+        # ---- 8. APLICAR CON SUAVIZADO EMA ----
         pwm_objetivo = pwm_actual + delta_pwm
         pwm_objetivo = max(float(PWM_MIN), min(float(PWM_MAX), pwm_objetivo))
-        pwm_suavizado = ALFA_PWM * pwm_objetivo + (1 - ALFA_PWM) * pwm_actual
-
-        # Limitador de cambio: evita caídas/subidas bruscas de PWM
-        cambio = pwm_suavizado - pwm_actual
-        cambio = max(-MAX_CAMBIO, min(MAX_CAMBIO, cambio))
-        pwm_actual += cambio
-        pwm_actual = max(float(PWM_MIN), min(float(PWM_MAX), pwm_actual))
+        pwm_actual   = ALFA_PWM * pwm_objetivo + (1.0 - ALFA_PWM) * pwm_actual
+        pwm_actual   = max(float(PWM_MIN), min(float(PWM_MAX), pwm_actual))
 
         fan.duty(int(pwm_actual))
 
-        # --- GUARDADO PROTEGIDO CONTRA MEMORY ERROR ---
-        data_log.append((tiempo_actual, dist, setpoint, error, deriv_f, delta_pwm, pwm_actual))
-        
+        # ---- Logging protegido contra MemoryError ----
+        data_log.append((
+            tiempo_seg, dist, setpoint, error,
+            deriv_f, integral, delta_pwm, pwm_actual
+        ))
         if len(data_log) > MAX_LOGS:
             data_log.pop(0)
 
-        # Limpiar la memoria RAM cada 100 ciclos (5 segundos)
+        # Limpieza de RAM cada 100 ciclos (~5 s)
         ciclos += 1
         if ciclos % 100 == 0:
             gc.collect()
 
-        print(f"Dist: {dist:05.2f} | Err: {error:+06.2f} | dE: {deriv_f:+06.2f} | dPWM: {delta_pwm:+05.2f} | PWM: {pwm_actual:06.2f}")
-        time.sleep(DT)
+        print("{:7.2f} | {:6.2f} | {:+7.2f} | {:+7.2f} | {:+7.2f} | {:+7.2f} | {:7.2f}".format(
+            tiempo_seg, dist, error, deriv_f, integral, delta_pwm, pwm_actual))
+
+        # ---- Compensar tiempo de loop ----
+        transcurrido = time.ticks_diff(time.ticks_ms(), t_ahora) / 1000.0
+        espera = DT_TARGET - transcurrido
+        if espera > 0:
+            time.sleep(espera)
 
 except KeyboardInterrupt:
-    # Aterrizaje suave: reducir PWM gradualmente
+    # Aterrizaje suave: bajar PWM gradualmente
     print("\nAterrizaje suave...")
     p = int(pwm_actual)
     while p > 150:
@@ -210,15 +356,34 @@ except KeyboardInterrupt:
         p -= 20
     fan.duty(0)
     fan.deinit()
-    print("Motor difuso detenido. Aterrizaje seguro.")
-    
-    resp = input(f"¿Guardar los últimos {len(data_log)} datos en CSV? (s/n): ").strip().lower()
+    print("Motor detenido. Aterrizaje seguro.")
+
+    # ---- Estadísticas ----
+    if data_log:
+        errores = [abs(d[3]) for d in data_log]
+        n = len(errores)
+        err_prom = sum(errores) / n
+        err_max  = max(errores)
+        en_1cm   = sum(1 for e in errores if e <= 1.0) * 100 // n
+        en_2cm   = sum(1 for e in errores if e <= 2.0) * 100 // n
+        en_3cm   = sum(1 for e in errores if e <= 3.0) * 100 // n
+
+        print("\n--- ESTADISTICAS ({} muestras) ---".format(n))
+        print("Error promedio: {:.2f} cm".format(err_prom))
+        print("Error maximo:   {:.2f} cm".format(err_max))
+        print("Dentro de +-1 cm: {}%".format(en_1cm))
+        print("Dentro de +-2 cm: {}%".format(en_2cm))
+        print("Dentro de +-3 cm: {}%".format(en_3cm))
+
+    # ---- Exportar CSV ----
+    resp = input("Guardar {} datos en CSV? (s/n): ".format(len(data_log))).strip().lower()
     if resp == 's':
         try:
             with open("datos_levitacion.csv", "w") as f:
-                f.write("tiempo,distancia,setpoint,error,derivada,delta_pwm,pwm\n")
+                f.write("tiempo,distancia,setpoint,error,derivada,integral,delta_pwm,pwm\n")
                 for d in data_log:
-                    f.write(f"{d[0]:.3f},{d[1]:.2f},{d[2]:.2f},{d[3]:.2f},{d[4]:.2f},{d[5]:.2f},{d[6]:.2f}\n")
-            print("Guardado con éxito en el ESP32.")
+                    f.write("{:.3f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f}\n".format(
+                        d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7]))
+            print("Guardado con exito en el ESP32.")
         except Exception as e:
-            print("Error al escribir el archivo:", e)
+            print("Error al guardar:", e)

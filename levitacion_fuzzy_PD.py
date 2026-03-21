@@ -3,7 +3,17 @@ import time
 import sys
 
 # ============================================================
-#  LEVITACIÓN DE PELOTA — Fuzzy PD v4
+#  LEVITACIÓN DE PELOTA — Fuzzy PID v5
+#  Control: Fuzzy PD + Integral con anti-windup
+# ============================================================
+#
+#  Mejoras respecto a v4:
+#  1. Integral con anti-windup  → elimina error en estado estable
+#  2. Sin zona muerta (impedía convergencia al setpoint)
+#  3. dt real medido  → derivada e integral precisas
+#  4. Rechazo de outliers en sensor
+#  5. Limitador de cambio adaptativo
+#  6. Compensación de tiempo de loop
 # ============================================================
 
 # -------- Pines --------
@@ -20,19 +30,32 @@ TUBO_CM        = 40.0
 DISTANCIA_MIN  = 2.0
 DISTANCIA_MAX  = 38.0
 VOLTAJE_FUENTE = 12.0
-DT             = 0.2
-ALFA_PWM       = 0.25
-ALFA_DERIV     = 0.20
-ZONA_MUERTA    = 1.5
+DT_TARGET      = 0.2        # Período objetivo del loop
+ALFA_PWM       = 0.30       # EMA del PWM (más responsivo que 0.25)
+ALFA_DERIV     = 0.25       # EMA de derivada
 PWM_MINIMO     = 200
 PWM_MAXIMO     = 900
 MAX_MUESTRAS   = 150
+
+# Integral (pieza clave para estabilización)
+KI             = 0.10       # Ganancia integral
+INTEGRAL_MAX   = 60.0       # Anti-windup
+INTEGRAL_DECAY = 0.998      # Decaimiento leve
+
+# Limitador adaptativo
+MAX_CAMBIO_CERCA = 30       # PWM/ciclo cuando cerca del setpoint
+MAX_CAMBIO_LEJOS = 80       # PWM/ciclo cuando lejos
+UMBRAL_CERCA     = 3.0      # cm
+
+# Sensor
+BUF_SIZE    = 7
+OUTLIER_THR = 5.0
 
 datos = []
 distancia_deseada = 20.0
 
 # ============================================================
-#  SENSOR
+#  SENSOR con mediana + rechazo de outliers
 # ============================================================
 _buf = []
 
@@ -51,9 +74,18 @@ def medir():
     global _buf
     d = medir_raw()
     if d < DISTANCIA_MIN or d > DISTANCIA_MAX:
+        if _buf:
+            return round(sorted(_buf)[len(_buf) // 2], 1)
         return -1.0
+
+    # Rechazo de outliers
+    if len(_buf) >= 3:
+        mediana = sorted(_buf)[len(_buf) // 2]
+        if abs(d - mediana) > OUTLIER_THR:
+            return round(mediana, 1)
+
     _buf.append(d)
-    if len(_buf) > 5:
+    if len(_buf) > BUF_SIZE:
         _buf.pop(0)
     if len(_buf) >= 3:
         s = sorted(_buf)
@@ -105,16 +137,19 @@ def mb(x, a, b, c, d):
 #  FUZZY PD
 # ============================================================
 def fuzzy(error, deriv, base):
-    e1 = mb(error,   6,  10,  99,  99)
-    e2 = mb(error,   1,   4,   8,  12)
-    e3 = mb(error,  -5,  -1,   1,   5)
-    e4 = mb(error, -12,  -8,  -4,  -1)
-    e5 = mb(error, -99, -99, -10,  -6)
+    # Error: 5 niveles
+    e1 = mb(error,   6,  10,  99,  99)   # Muy abajo
+    e2 = mb(error,   1,   4,   8,  12)   # Abajo
+    e3 = mb(error,  -3,  -0.5, 0.5, 3)   # En punto (zona más estrecha)
+    e4 = mb(error, -12,  -8,  -4,  -1)   # Arriba
+    e5 = mb(error, -99, -99, -10,  -6)   # Muy arriba
 
-    d1 = mb(deriv,  2,   5,  99,  99)
-    d2 = mb(deriv, -2,   0,   0,   2)
-    d3 = mb(deriv, -99, -99, -5,  -2)
+    # Derivada: 3 niveles
+    d1 = mb(deriv,  2,   5,  99,  99)    # Cayendo
+    d2 = mb(deriv, -2,   0,   0,   2)    # Quieta
+    d3 = mb(deriv, -99, -99, -5,  -2)    # Subiendo
 
+    # Salidas como offsets del base
     s5 = min(base + 320, PWM_MAXIMO)
     s4 = min(base + 200, PWM_MAXIMO)
     s3 = base + 80
@@ -143,16 +178,16 @@ def stats():
     if not datos:
         return
     sys.stdout.write("\n--- DATOS ---\n")
-    sys.stdout.write("t,pos,des,error,deriv,duty,volt\n")
+    sys.stdout.write("t,pos,des,error,deriv,integral,duty,volt\n")
     for d in datos:
-        t, pos, err, der, dty, vlt = d
+        t, pos, err, der, intg, dty, vlt = d
         sys.stdout.write(str(t) + "," + str(pos) + "," +
                          str(distancia_deseada) + "," + str(err) +
-                         "," + str(der) + "," + str(dty) +
-                         "," + str(vlt) + "\n")
+                         "," + str(der) + "," + str(intg) +
+                         "," + str(dty) + "," + str(vlt) + "\n")
 
     errores = [abs(d[2]) for d in datos]
-    pwms    = [d[4]      for d in datos]
+    pwms    = [d[5]      for d in datos]
     pos     = [d[1]      for d in datos]
     n       = len(datos)
 
@@ -175,7 +210,7 @@ def stats():
 # ============================================================
 #  INICIO
 # ============================================================
-sys.stdout.write("LEVITACION DE PELOTA v4\n")
+sys.stdout.write("LEVITACION DE PELOTA v5 (Fuzzy PID)\n")
 sys.stdout.write("Fuente: " + str(VOLTAJE_FUENTE) + "V\n")
 sys.stdout.write("Rango sensor: " + str(DISTANCIA_MIN) + " a " + str(DISTANCIA_MAX) + "cm\n\n")
 
@@ -213,16 +248,18 @@ while True:
 
 sys.stdout.write("Setpoint: " + str(distancia_deseada) + "cm\n")
 sys.stdout.write("Ctrl+C para detener y ver datos\n\n")
-sys.stdout.write("t(s) | pos | error | deriv | duty | volt | estado\n")
-sys.stdout.write("-" * 55 + "\n")
+sys.stdout.write("t(s) | pos | error | deriv | integ | duty | volt | estado\n")
+sys.stdout.write("-" * 65 + "\n")
 
-# Variables
-err_ant  = 0.0
-der_fil  = 0.0
-pwm_suav = float(PWM_BASE)
-inv      = 0
-duty     = PWM_BASE
-t0       = time.time()
+# Variables de estado
+err_ant   = 0.0
+der_fil   = 0.0
+integral  = 0.0       # NUEVO: acumulador integral
+pwm_suav  = float(PWM_BASE)
+inv       = 0
+duty      = PWM_BASE
+t0        = time.time()
+t_ant_ms  = time.ticks_ms()  # Para medir dt real
 
 # Arranque progresivo
 sys.stdout.write("Arranque...\n")
@@ -235,10 +272,19 @@ pwm.duty(PWM_BASE)
 time.sleep(1.5)
 
 # ============================================================
-#  LOOP
+#  LOOP PRINCIPAL
 # ============================================================
 while True:
     try:
+        # Medir dt real
+        t_ahora_ms = time.ticks_ms()
+        dt_real = time.ticks_diff(t_ahora_ms, t_ant_ms) / 1000.0
+        t_ant_ms = t_ahora_ms
+        if dt_real < 0.01:
+            dt_real = 0.01
+        elif dt_real > 1.0:
+            dt_real = 1.0
+
         t = round(time.time() - t0, 1)
         dist = medir()
 
@@ -248,30 +294,49 @@ while True:
             if inv > 5:
                 sys.stdout.write("Demasiadas lecturas invalidas\n")
                 break
-            time.sleep(DT)
+            time.sleep(DT_TARGET)
             continue
 
         inv = 0
         error  = round(dist - distancia_deseada, 1)
-        dr_raw = (error - err_ant) / DT
+        dr_raw = (error - err_ant) / dt_real
         der_fil = round(ALFA_DERIV * dr_raw + (1 - ALFA_DERIV) * der_fil, 2)
         err_ant = error
 
-        if abs(error) < ZONA_MUERTA:
-            pwm_r = pwm_suav
-        else:
-            pwm_r = fuzzy(error, der_fil, PWM_BASE)
+        # Integral con anti-windup (NUEVO)
+        if abs(error) < 10.0:
+            integral += error * dt_real
+            integral *= INTEGRAL_DECAY
+            if integral > INTEGRAL_MAX:
+                integral = INTEGRAL_MAX
+            elif integral < -INTEGRAL_MAX:
+                integral = -INTEGRAL_MAX
 
+        # Fuzzy PD + Integral (sin zona muerta — la integral converge sola)
+        pwm_fuzzy = fuzzy(error, der_fil, PWM_BASE)
+        pwm_r = pwm_fuzzy + KI * integral
+
+        # Suavizado EMA
         pwm_suav = ALFA_PWM * pwm_r + (1 - ALFA_PWM) * pwm_suav
-        duty = int(max(PWM_MINIMO, min(PWM_MAXIMO, pwm_suav)))
+
+        # Limitador adaptativo
+        if abs(error) > UMBRAL_CERCA:
+            max_cambio = MAX_CAMBIO_LEJOS
+        else:
+            max_cambio = MAX_CAMBIO_CERCA
+        cambio = pwm_suav - duty
+        cambio = max(-max_cambio, min(max_cambio, cambio))
+        duty = int(max(PWM_MINIMO, min(PWM_MAXIMO, duty + cambio)))
+        pwm_suav = float(duty)
+
         pwm.duty(duty)
 
         volt = round((duty / 1023) * VOLTAJE_FUENTE, 1)
 
         if len(datos) < MAX_MUESTRAS:
-            datos.append([t, dist, error, der_fil, duty, volt])
+            datos.append([t, dist, error, der_fil, integral, duty, volt])
 
-        if abs(error) <= ZONA_MUERTA:
+        if abs(error) <= 1.0:
             estado = "EN PUNTO"
         elif error > 0:
             estado = "ABAJO"
@@ -282,11 +347,16 @@ while True:
                          str(dist) + "cm | " +
                          str(error) + "cm | " +
                          str(der_fil) + " | " +
+                         str(round(integral, 1)) + " | " +
                          str(duty) + " | " +
                          str(volt) + "V | " +
                          estado + "\n")
 
-        time.sleep(DT)
+        # Compensar tiempo de loop
+        transcurrido = time.ticks_diff(time.ticks_ms(), t_ahora_ms) / 1000.0
+        espera = DT_TARGET - transcurrido
+        if espera > 0:
+            time.sleep(espera)
 
     except KeyboardInterrupt:
         sys.stdout.write("\nDeteniendo...\n")
