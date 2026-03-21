@@ -36,7 +36,7 @@ INTEGRAL_MAX   = 40.0
 INTEGRAL_DECAY = 0.998
 
 buf = []
-_rechazos = 0           # Contador de lecturas rechazadas consecutivas
+rechazos = 0           # Contador de lecturas rechazadas consecutivas
 MAX_RECHAZOS = 5        # Tras este número, limpiar búfer para re-adaptar
 
 # --- Gestión de memoria para CSV ---
@@ -59,7 +59,7 @@ def trimf(x, a, b, c):
     return trapmf(x, a, b, b, c)
 
 def medir_cm():
-    global buf, _rechazos
+    global buf, rechazos
     trig.off()
     time.sleep_us(2)
     trig.on()
@@ -68,10 +68,10 @@ def medir_cm():
     dur = time_pulse_us(echo, 1, 30000)
 
     if dur < 0:
-        _rechazos += 1
-        if _rechazos >= MAX_RECHAZOS:
+        rechazos += 1
+        if rechazos >= MAX_RECHAZOS:
             buf = []
-            _rechazos = 0
+            rechazos = 0
         if buf:
             return round(sorted(buf)[len(buf) // 2], 2)
         return -1.0
@@ -79,10 +79,10 @@ def medir_cm():
     d = dur * 0.034 / 2
 
     if d < SENSOR_MIN or d > SENSOR_MAX:
-        _rechazos += 1
-        if _rechazos >= MAX_RECHAZOS:
+        rechazos += 1
+        if rechazos >= MAX_RECHAZOS:
             buf = []
-            _rechazos = 0
+            rechazos = 0
         if buf:
             return round(sorted(buf)[len(buf) // 2], 2)
         return -1.0
@@ -91,14 +91,14 @@ def medir_cm():
     if len(buf) >= 3:
         mediana = sorted(buf)[len(buf) // 2]
         if abs(d - mediana) > OUTLIER_THR:
-            _rechazos += 1
-            if _rechazos >= MAX_RECHAZOS:
+            rechazos += 1
+            if rechazos >= MAX_RECHAZOS:
                 buf = [d]
-                _rechazos = 0
+                rechazos = 0
                 return round(d, 2)
             return round(mediana, 2)
 
-    _rechazos = 0
+    rechazos = 0
     buf.append(d)
     if len(buf) > BUF_SIZE:
         buf.pop(0)

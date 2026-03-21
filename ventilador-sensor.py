@@ -16,7 +16,7 @@ DT = 0.05
 PWM_MAX = 900
 PWM_MIN = 170
 buf = []
-_rechazos = 0           # Contador de lecturas rechazadas consecutivas
+rechazos = 0           # Contador de lecturas rechazadas consecutivas
 MAX_RECHAZOS = 5        # Tras este número, limpiar búfer para re-adaptar
 
 # --- FUNCIONES DE PERTENENCIA DIFUSA (Fuzzification) ---
@@ -33,7 +33,7 @@ def trimf(x, a, b, c):
     return trapmf(x, a, b, b, c)
 
 def medir_cm():
-    global buf, _rechazos
+    global buf, rechazos
     trig.off()
     time.sleep_us(2)
     trig.on()
@@ -41,19 +41,19 @@ def medir_cm():
     trig.off()
     dur = time_pulse_us(echo, 1, 30000)
     if dur < 0:
-        _rechazos += 1
-        if _rechazos >= MAX_RECHAZOS:
+        rechazos += 1
+        if rechazos >= MAX_RECHAZOS:
             buf = []
-            _rechazos = 0
+            rechazos = 0
         return -1.0 if not buf else round(sorted(buf)[len(buf)//2], 1)
     d = dur * 0.034 / 2
     if d < 3 or d > 40:
-        _rechazos += 1
-        if _rechazos >= MAX_RECHAZOS:
+        rechazos += 1
+        if rechazos >= MAX_RECHAZOS:
             buf = []
-            _rechazos = 0
+            rechazos = 0
         return -1.0 if not buf else round(sorted(buf)[len(buf)//2], 1)
-    _rechazos = 0
+    rechazos = 0
     buf.append(d)
     if len(buf) > 5: buf.pop(0)
     return round(sorted(buf)[len(buf)//2], 1)
