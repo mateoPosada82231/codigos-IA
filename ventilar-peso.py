@@ -14,11 +14,12 @@ fan = PWM(Pin(FAN_PIN), freq=25000, duty=0)
 # Variables de control
 DT = 0.05  # 20 Hz (Súper rápido para atrapar caídas)
 PWM_MAX = 900
-PWM_MIN = 170  # Límite seguro calibrado
-ALFA_PWM = 0.4      # Suavizado exponencial de PWM (40% nuevo, 60% anterior)
-ALFA_DERIV = 0.35   # Filtro de derivada más responsivo
-ZONA_MUERTA = 1.0   # Zona de tolerancia (cm) alrededor del setpoint
-UMBRAL_DERIV = 3.0   # Umbral de derivada para zona muerta (cm/s)
+PWM_MIN = 80   # Reducido para que la pelota liviana pueda descender al setpoint
+ALFA_PWM = 0.65     # Suavizado más responsivo (65% nuevo, 35% anterior)
+ALFA_DERIV = 0.30   # Filtro de derivada con más suavizado para estabilidad
+ZONA_MUERTA = 0.5   # Zona de tolerancia más fina (cm)
+UMBRAL_DERIV = 2.0   # Reaccionar antes al movimiento de la pelota (cm/s)
+MAX_CAMBIO = 6.0     # Límite de cambio de PWM por ciclo (evita saltos bruscos)
 MAX_LECTURAS_INV = 10  # Máximo de lecturas inválidas consecutivas antes de parar
 buf = []
 
@@ -63,47 +64,48 @@ try:
 except:
     setpoint = 20.0
 
-pwm_actual = 350.0  # Iniciamos un poco más bajo por el poco peso
+pwm_actual = 250.0  # Inicio bajo para pelota ultra-liviana (0.5g)
 error_ant = 0.0
 deriv_f = 0.0
 lecturas_invalidas = 0
 
-# Arranque progresivo del ventilador
+# Arranque progresivo del ventilador (más suave para pelota liviana)
 print("Arranque progresivo...")
-p = 150
+p = 80
 while p < int(pwm_actual):
     fan.duty(p)
     time.sleep(0.05)
-    p += 20
+    p += 15
 fan.duty(int(pwm_actual))
 time.sleep(1)
 
 # =================================================================
-# DELTAS DE PWM: AJUSTADOS PARA CONTROL EFECTIVO DE 0.5 GRAMOS
-# Los deltas anteriores eran demasiado pequeños (-4 a +8), haciendo
-# que el sistema no pudiera corregir la posición a tiempo.
+# DELTAS DE PWM: MODERADOS PARA CONTROL GRADUAL DE 0.5 GRAMOS
+# Deltas reducidos + suavizado responsivo + limitador de cambio
+# evitan que el ventilador se apague bruscamente y provoque caídas.
 # =================================================================
-NV_out = -15.0  # Freno de emergencia fuerte
-NB_out =  -8.0  # Bajar rápido
-NM_out =  -3.0  # Bajar moderado
-NS_out =  -1.0  # Ajuste fino hacia abajo
-Z_out  =   0.0  # MANTENER POTENCIA EXACTA
-PS_out =   1.5  # Ajuste fino hacia arriba
-PM_out =   4.0  # Empujón moderado
-PB_out =  10.0  # Subida rápida
-PV_out =  25.0  # Rescate fuerte desde el fondo
+NV_out = -8.0   # Freno fuerte pero controlado (era -15)
+NB_out = -5.0   # Bajar rápido (era -8)
+NM_out = -2.5   # Bajar moderado (era -3)
+NS_out = -1.0   # Ajuste fino hacia abajo
+Z_out  =  0.0   # MANTENER POTENCIA EXACTA
+PS_out =  1.5   # Ajuste fino hacia arriba
+PM_out =  4.0   # Empujón moderado
+PB_out =  8.0   # Subida rápida (era 10)
+PV_out = 18.0   # Rescate fuerte (era 25)
 
-# Matriz FAM Asimétrica (Anti Yo-Yo) con amortiguación fuerte en zona cero
+# Matriz FAM Asimétrica con más amortiguación central (Anti Yo-Yo)
+# Filas NS/Z/PS tienen más entradas Z para evitar sobre-correcciones
 FAM = [
     [NV_out, NV_out, NB_out, NM_out, NS_out, Z_out,  Z_out ],  # NV: Muy arriba
-    [NV_out, NB_out, NM_out, NS_out, Z_out,  PS_out, PS_out],  # NB
+    [NV_out, NB_out, NM_out, NS_out, Z_out,  Z_out,  PS_out],  # NB
     [NB_out, NM_out, NS_out, NS_out, Z_out,  PS_out, PM_out],  # NM
-    [NM_out, NS_out, NS_out, NS_out, PS_out, PM_out, PM_out],  # NS
-    [NB_out, NM_out, NS_out, Z_out,  PS_out, PM_out, PB_out],  # Z: Amortiguar movimiento activamente
-    [NM_out, NS_out, Z_out,  PS_out, PS_out, PM_out, PB_out],  # PS
-    [NS_out, Z_out,  Z_out,  PS_out, PM_out, PB_out, PB_out],  # PM
-    [Z_out,  Z_out,  PS_out, PM_out, PB_out, PB_out, PV_out],  # PB
-    [Z_out,  PS_out, PM_out, PB_out, PB_out, PV_out, PV_out]   # PV: Muy abajo
+    [NM_out, NS_out, NS_out, Z_out,  Z_out,  PS_out, PM_out],  # NS: Más Z para estabilidad
+    [NM_out, NS_out, Z_out,  Z_out,  Z_out,  PS_out, PM_out],  # Z: Triple Z central = estable
+    [NM_out, NS_out, Z_out,  Z_out,  PS_out, PS_out, PM_out],  # PS: Más Z para estabilidad
+    [NM_out, NS_out, Z_out,  PS_out, PS_out, PM_out, PB_out],  # PM
+    [NS_out, Z_out,  Z_out,  PS_out, PM_out, PB_out, PV_out],  # PB
+    [Z_out,  Z_out,  PS_out, PM_out, PB_out, PV_out, PV_out]   # PV: Muy abajo
 ]
 
 t_inicio = time.ticks_ms()
@@ -171,10 +173,15 @@ try:
 
             delta_pwm = (numerador / denominador) if denominador > 0 else 0.0
 
-        # 6. Aplicar con suavizado exponencial (evita saltos bruscos)
+        # 6. Aplicar con suavizado exponencial + limitador de cambio
         pwm_objetivo = pwm_actual + delta_pwm
         pwm_objetivo = max(float(PWM_MIN), min(float(PWM_MAX), pwm_objetivo))
-        pwm_actual = ALFA_PWM * pwm_objetivo + (1 - ALFA_PWM) * pwm_actual
+        pwm_suavizado = ALFA_PWM * pwm_objetivo + (1 - ALFA_PWM) * pwm_actual
+
+        # Limitador de cambio: evita caídas/subidas bruscas de PWM
+        cambio = pwm_suavizado - pwm_actual
+        cambio = max(-MAX_CAMBIO, min(MAX_CAMBIO, cambio))
+        pwm_actual += cambio
         pwm_actual = max(float(PWM_MIN), min(float(PWM_MAX), pwm_actual))
 
         fan.duty(int(pwm_actual))
