@@ -105,6 +105,8 @@ def medir_cm():
         buf.pop(0)
     if len(buf) >= 3:
         return round(sorted(buf)[len(buf) // 2], 2)
+    if not buf:
+        return -1.0
     return round(sum(buf) / len(buf), 2)
 
 
