@@ -16,6 +16,8 @@ DT = 0.05
 PWM_MAX = 900
 PWM_MIN = 170
 buf = []
+_rechazos = 0           # Contador de lecturas rechazadas consecutivas
+MAX_RECHAZOS = 5        # Tras este número, limpiar búfer para re-adaptar
 
 # --- FUNCIONES DE PERTENENCIA DIFUSA (Fuzzification) ---
 # Trapecio: x, a (inicio), b (subida), c (bajada), d (fin)
@@ -31,16 +33,27 @@ def trimf(x, a, b, c):
     return trapmf(x, a, b, b, c)
 
 def medir_cm():
-    global buf
+    global buf, _rechazos
     trig.off()
     time.sleep_us(2)
     trig.on()
     time.sleep_us(10)
     trig.off()
     dur = time_pulse_us(echo, 1, 30000)
-    if dur < 0: return -1.0 if not buf else round(sorted(buf)[len(buf)//2], 1)
+    if dur < 0:
+        _rechazos += 1
+        if _rechazos >= MAX_RECHAZOS:
+            buf = []
+            _rechazos = 0
+        return -1.0 if not buf else round(sorted(buf)[len(buf)//2], 1)
     d = dur * 0.034 / 2
-    if d < 3 or d > 40: return -1.0 if not buf else round(sorted(buf)[len(buf)//2], 1)
+    if d < 3 or d > 40:
+        _rechazos += 1
+        if _rechazos >= MAX_RECHAZOS:
+            buf = []
+            _rechazos = 0
+        return -1.0 if not buf else round(sorted(buf)[len(buf)//2], 1)
+    _rechazos = 0
     buf.append(d)
     if len(buf) > 5: buf.pop(0)
     return round(sorted(buf)[len(buf)//2], 1)
@@ -78,7 +91,7 @@ while True:
         # e_Z: Error Cero (Pelota en objetivo)
         # e_P: Error Positivo (Pelota abajo)
         e_N = trapmf(error, -40, -40, -5, -1)
-        e_Z = trimf(error, -3, 0, 3)
+        e_Z = trapmf(error, -3, -1, 1, 3)
         e_P = trapmf(error, 1, 5, 40, 40)
 
         # 3. Fuzzificación de la Derivada
@@ -86,7 +99,7 @@ while True:
         # de_Z: Estable
         # de_P: Cayendo rápido
         de_N = trapmf(deriv_f, -50, -50, -10, -2)
-        de_Z = trimf(deriv_f, -5, 0, 5)
+        de_Z = trapmf(deriv_f, -5, -1, 1, 5)
         de_P = trapmf(deriv_f, 2, 10, 50, 50)
 
         # 4. Evaluacion de Reglas Difusas (AND = min) y Salidas (Singletons)

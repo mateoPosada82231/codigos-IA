@@ -69,9 +69,11 @@ MAX_LOGS = 1200          # ~60 s a 20 Hz
 
 # ---- Sensor ultrasónico con mediana + rechazo de outliers ----
 buf = []
+_rechazos = 0           # Contador de lecturas rechazadas consecutivas
+MAX_RECHAZOS = 5        # Tras este número, limpiar búfer para re-adaptar
 
 def medir_cm():
-    global buf
+    global buf, _rechazos
     trig.off()
     time.sleep_us(2)
     trig.on()
@@ -82,6 +84,10 @@ def medir_cm():
 
     # Lectura fallida → devolver mediana del búfer (o -1 si vacío)
     if dur < 0:
+        _rechazos += 1
+        if _rechazos >= MAX_RECHAZOS:
+            buf = []
+            _rechazos = 0
         if buf:
             return round(sorted(buf)[len(buf) // 2], 2)
         return -1.0
@@ -89,6 +95,10 @@ def medir_cm():
     d = dur * 0.034 / 2
 
     if d < SENSOR_MIN or d > SENSOR_MAX:
+        _rechazos += 1
+        if _rechazos >= MAX_RECHAZOS:
+            buf = []
+            _rechazos = 0
         if buf:
             return round(sorted(buf)[len(buf) // 2], 2)
         return -1.0
@@ -98,8 +108,14 @@ def medir_cm():
     if len(buf) >= 3:
         mediana = sorted(buf)[len(buf) // 2]
         if abs(d - mediana) > OUTLIER_THR:
+            _rechazos += 1
+            if _rechazos >= MAX_RECHAZOS:
+                buf = [d]
+                _rechazos = 0
+                return round(d, 2)
             return round(mediana, 2)
 
+    _rechazos = 0
     buf.append(d)
     if len(buf) > BUF_SIZE:
         buf.pop(0)
@@ -172,29 +188,29 @@ FAM = [
 
 
 def fuzzificar_error(e):
-    """Convierte error (cm) en 9 grados de pertenencia."""
+    """Convierte error (cm) en 9 grados de pertenencia (trapecios)."""
     return [
-        trapmf(e, -50, -50, -12, -6),   # NV: muy arriba
-        trimf(e,  -10,  -6, -3),         # NB
-        trimf(e,   -5,  -3, -1),         # NM
-        trimf(e,   -2,  -1,  0),         # NS
-        trimf(e,   -1.5, 0,  1.5),       # Z : en el punto
-        trimf(e,    0,   1,  2),         # PS
-        trimf(e,    1,   3,  5),         # PM
-        trimf(e,    3,   6, 10),         # PB
-        trapmf(e,   6,  12, 50, 50),     # PV: muy abajo
+        trapmf(e, -50, -50, -12,  -6),    # NV: muy arriba
+        trapmf(e, -10,  -7,  -5,  -3),    # NB
+        trapmf(e,  -5, -3.5, -2.5, -1),   # NM
+        trapmf(e,  -2, -1.3, -0.7,  0),   # NS
+        trapmf(e, -1.5, -0.5, 0.5, 1.5),  # Z : en el punto
+        trapmf(e,   0,  0.7, 1.3,  2),    # PS
+        trapmf(e,   1,  2.5, 3.5,  5),    # PM
+        trapmf(e,   3,   5,   7,  10),    # PB
+        trapmf(e,   6,  12,  50,  50),    # PV: muy abajo
     ]
 
 def fuzzificar_derivada(de):
-    """Convierte derivada (cm/s) en 7 grados de pertenencia."""
+    """Convierte derivada (cm/s) en 7 grados de pertenencia (trapecios)."""
     return [
-        trapmf(de, -80, -80, -20,  -8),  # NV: subiendo muy rápido
-        trimf(de,  -15,  -8,  -3),        # NB: subiendo rápido
-        trimf(de,   -5,  -2,   0),        # NS: subiendo lento
-        trimf(de,   -1.5, 0,   1.5),      # Z : quieta
-        trimf(de,    0,   2,   5),        # PS: cayendo lento
-        trimf(de,    3,   8,  15),        # PB: cayendo rápido
-        trapmf(de,   8,  20,  80,  80),   # PV: cayendo en picada
+        trapmf(de, -80, -80, -20,   -8),   # NV: subiendo muy rápido
+        trapmf(de, -15, -10,  -6,   -3),   # NB: subiendo rápido
+        trapmf(de,  -5,  -3,  -1,    0),   # NS: subiendo lento
+        trapmf(de, -1.5, -0.5, 0.5, 1.5),  # Z : quieta
+        trapmf(de,   0,   1,   3,    5),   # PS: cayendo lento
+        trapmf(de,   3,   6,  10,   15),   # PB: cayendo rápido
+        trapmf(de,   8,  20,  80,   80),   # PV: cayendo en picada
     ]
 
 def inferencia_fuzzy(error, derivada):
