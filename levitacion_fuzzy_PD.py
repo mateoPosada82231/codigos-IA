@@ -326,8 +326,8 @@ while True:
             max_cambio = MAX_CAMBIO_CERCA
         cambio = pwm_suav - duty
         cambio = max(-max_cambio, min(max_cambio, cambio))
+        pwm_suav = max(float(PWM_MINIMO), min(float(PWM_MAXIMO), pwm_suav))
         duty = int(max(PWM_MINIMO, min(PWM_MAXIMO, duty + cambio)))
-        pwm_suav = float(duty)
 
         pwm.duty(duty)
 
@@ -337,7 +337,7 @@ while True:
             datos.append([t, dist, error, der_fil, integral, duty, volt])
 
         if abs(error) <= 1.0:
-            estado = "EN PUNTO"
+            estado = "EN EL PUNTO"
         elif error > 0:
             estado = "ABAJO"
         else:
