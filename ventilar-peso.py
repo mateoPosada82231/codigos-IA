@@ -18,6 +18,8 @@ PWM_MIN = 170  # Límite seguro calibrado
 ALFA_PWM = 0.4      # Suavizado exponencial de PWM (40% nuevo, 60% anterior)
 ALFA_DERIV = 0.35   # Filtro de derivada más responsivo
 ZONA_MUERTA = 1.0   # Zona de tolerancia (cm) alrededor del setpoint
+UMBRAL_DERIV = 3.0   # Umbral de derivada para zona muerta (cm/s)
+MAX_LECTURAS_INV = 10  # Máximo de lecturas inválidas consecutivas antes de parar
 buf = []
 
 # --- GESTIÓN DE MEMORIA PARA EL CSV ---
@@ -114,7 +116,7 @@ try:
         dist = medir_cm()
         if dist < 0:
             lecturas_invalidas += 1
-            if lecturas_invalidas > 10:
+            if lecturas_invalidas > MAX_LECTURAS_INV:
                 print("Demasiadas lecturas invalidas. Deteniendo por seguridad.")
                 break
             time.sleep(DT)
@@ -130,7 +132,7 @@ try:
         error_ant = error
 
         # 2. Zona muerta: si error pequeño Y pelota casi quieta, no corregir
-        if abs(error) < ZONA_MUERTA and abs(deriv_f) < 3.0:
+        if abs(error) < ZONA_MUERTA and abs(deriv_f) < UMBRAL_DERIV:
             delta_pwm = 0.0
         else:
             # 3. Funciones de Error (Zona "Cero" ampliada a ±2 cm)
