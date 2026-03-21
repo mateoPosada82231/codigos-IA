@@ -103,7 +103,9 @@ def medir_cm():
     buf.append(d)
     if len(buf) > BUF_SIZE:
         buf.pop(0)
-    return round(sorted(buf)[len(buf) // 2], 2)
+    if len(buf) >= 3:
+        return round(sorted(buf)[len(buf) // 2], 2)
+    return round(sum(buf) / len(buf), 2)
 
 
 # ---- Funciones de pertenencia ----
