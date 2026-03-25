@@ -33,7 +33,7 @@ VOLTAJE_FUENTE = 12.0
 DT_TARGET      = 0.2        # Período objetivo del loop
 ALFA_PWM       = 0.30       # EMA del PWM (más responsivo que 0.25)
 ALFA_DERIV     = 0.25       # EMA de derivada
-PWM_MINIMO     = 200
+PWM_MINIMO     = 170
 PWM_MAXIMO     = 900
 MAX_MUESTRAS   = 150
 

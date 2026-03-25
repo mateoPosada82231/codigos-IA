@@ -13,8 +13,8 @@ fan = PWM(Pin(FAN_PIN), freq=25000, duty=0)
 
 # Variables de control
 DT = 0.05
-PWM_MAX = 900
-PWM_MIN = 170
+PWM_MAX = 600
+PWM_MIN = 163
 buf = []
 rechazos = 0           # Contador de lecturas rechazadas consecutivas
 MAX_RECHAZOS = 5        # Tras este número, limpiar búfer para re-adaptar

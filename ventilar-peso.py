@@ -41,7 +41,7 @@ fan  = PWM(Pin(FAN_PIN), freq=25000, duty=0)
 # ---- Parámetros del controlador ----
 DT_TARGET = 0.05        # Período objetivo del loop (20 Hz)
 PWM_MAX   = 900
-PWM_MIN   = 80
+PWM_MIN   = 164.25
 
 # Sensor
 SENSOR_MIN  = 3.0       # Distancia mínima válida (cm)
