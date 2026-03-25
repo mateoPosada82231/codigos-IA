@@ -36,6 +36,8 @@ INTEGRAL_MAX   = 40.0
 INTEGRAL_DECAY = 0.998
 
 buf = []
+rechazos = 0           # Contador de lecturas rechazadas consecutivas
+MAX_RECHAZOS = 5        # Tras este número, limpiar búfer para re-adaptar
 
 # --- Gestión de memoria para CSV ---
 data_log = []
@@ -57,7 +59,7 @@ def trimf(x, a, b, c):
     return trapmf(x, a, b, b, c)
 
 def medir_cm():
-    global buf
+    global buf, rechazos
     trig.off()
     time.sleep_us(2)
     trig.on()
@@ -66,6 +68,10 @@ def medir_cm():
     dur = time_pulse_us(echo, 1, 30000)
 
     if dur < 0:
+        rechazos += 1
+        if rechazos >= MAX_RECHAZOS:
+            buf = []
+            rechazos = 0
         if buf:
             return round(sorted(buf)[len(buf) // 2], 2)
         return -1.0
@@ -73,6 +79,10 @@ def medir_cm():
     d = dur * 0.034 / 2
 
     if d < SENSOR_MIN or d > SENSOR_MAX:
+        rechazos += 1
+        if rechazos >= MAX_RECHAZOS:
+            buf = []
+            rechazos = 0
         if buf:
             return round(sorted(buf)[len(buf) // 2], 2)
         return -1.0
@@ -81,8 +91,14 @@ def medir_cm():
     if len(buf) >= 3:
         mediana = sorted(buf)[len(buf) // 2]
         if abs(d - mediana) > OUTLIER_THR:
+            rechazos += 1
+            if rechazos >= MAX_RECHAZOS:
+                buf = [d]
+                rechazos = 0
+                return round(d, 2)
             return round(mediana, 2)
 
+    rechazos = 0
     buf.append(d)
     if len(buf) > BUF_SIZE:
         buf.pop(0)
@@ -167,28 +183,28 @@ try:
             elif integral < -INTEGRAL_MAX:
                 integral = -INTEGRAL_MAX
 
-        # 3. Funciones de Error
+        # 3. Funciones de Error (trapecios para mayor precisión)
         e_niveles = [
-            trapmf(error, -50, -50, -15, -8),
-            trimf(error, -12, -8, -4),
-            trimf(error, -6, -4, -1.5),
-            trimf(error, -2.5, -1.0, 0),
-            trimf(error, -1.0, 0.0, 1.0),
-            trimf(error, 0, 1.0, 2.5),
-            trimf(error, 1.5, 4, 6),
-            trimf(error, 4, 8, 12),
-            trapmf(error, 8, 15, 50, 50)
+            trapmf(error, -50, -50, -15, -8),       # NV
+            trapmf(error, -12, -9, -7, -4),          # NB
+            trapmf(error, -6, -4.5, -3.5, -1.5),    # NM
+            trapmf(error, -2.5, -1.5, -0.5, 0),     # NS
+            trapmf(error, -1.0, -0.3, 0.3, 1.0),    # Z
+            trapmf(error, 0, 0.5, 1.5, 2.5),        # PS
+            trapmf(error, 1.5, 3, 5, 6),             # PM
+            trapmf(error, 4, 6, 10, 12),             # PB
+            trapmf(error, 8, 15, 50, 50)             # PV
         ]
 
-        # 4. Funciones de Derivada
+        # 4. Funciones de Derivada (trapecios para mayor precisión)
         de_niveles = [
-            trapmf(deriv_f, -80, -80, -25, -10),
-            trimf(deriv_f, -20, -10, -3),
-            trimf(deriv_f, -6, -3, 0),
-            trimf(deriv_f, -1.5, 0, 1.5),
-            trimf(deriv_f, 0, 3, 6),
-            trimf(deriv_f, 3, 10, 20),
-            trapmf(deriv_f, 10, 25, 80, 80)
+            trapmf(deriv_f, -80, -80, -25, -10),     # NV
+            trapmf(deriv_f, -20, -12, -8, -3),       # NB
+            trapmf(deriv_f, -6, -4, -2, 0),          # NS
+            trapmf(deriv_f, -1.5, -0.5, 0.5, 1.5),  # Z
+            trapmf(deriv_f, 0, 2, 4, 6),             # PS
+            trapmf(deriv_f, 3, 7, 13, 20),           # PB
+            trapmf(deriv_f, 10, 25, 80, 80)          # PV
         ]
 
         # 5. Inferencia Fuzzy (PD)

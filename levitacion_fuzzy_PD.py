@@ -58,6 +58,8 @@ distancia_deseada = 20.0
 #  SENSOR con mediana + rechazo de outliers
 # ============================================================
 _buf = []
+_rechazos = 0           # Contador de lecturas rechazadas consecutivas
+MAX_RECHAZOS = 5        # Tras este número, limpiar búfer para re-adaptar
 
 def medir_raw():
     trig.off()
@@ -71,9 +73,13 @@ def medir_raw():
     return round(dur * 0.034 / 2, 1)
 
 def medir():
-    global _buf
+    global _buf, _rechazos
     d = medir_raw()
     if d < DISTANCIA_MIN or d > DISTANCIA_MAX:
+        _rechazos += 1
+        if _rechazos >= MAX_RECHAZOS:
+            _buf = []
+            _rechazos = 0
         if _buf:
             return round(sorted(_buf)[len(_buf) // 2], 1)
         return -1.0
@@ -82,8 +88,14 @@ def medir():
     if len(_buf) >= 3:
         mediana = sorted(_buf)[len(_buf) // 2]
         if abs(d - mediana) > OUTLIER_THR:
+            _rechazos += 1
+            if _rechazos >= MAX_RECHAZOS:
+                _buf = [d]
+                _rechazos = 0
+                return round(d, 1)
             return round(mediana, 1)
 
+    _rechazos = 0
     _buf.append(d)
     if len(_buf) > BUF_SIZE:
         _buf.pop(0)
@@ -146,7 +158,7 @@ def fuzzy(error, deriv, base):
 
     # Derivada: 3 niveles
     d1 = mb(deriv,  2,   5,  99,  99)    # Cayendo
-    d2 = mb(deriv, -2,   0,   0,   2)    # Quieta
+    d2 = mb(deriv, -2,  -0.5, 0.5,  2)    # Quieta (trapecio)
     d3 = mb(deriv, -99, -99, -5,  -2)    # Subiendo
 
     # Salidas como offsets del base
