@@ -1,2 +1,5 @@
 __pycache__/
 *.pyc
+pesos_levitador.pkl
+entrenamiento_levitador.png
+comparacion_fuzzy_vs_rn.png
