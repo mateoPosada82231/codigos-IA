@@ -1,7 +1,6 @@
 from machine import Pin, PWM, time_pulse_us
 import time
 import gc
-import math
 
 # =====================================================================
 #  LEVITACIÓN DE PELOTA — Controlador Red Neuronal (reemplaza Fuzzy)
@@ -66,7 +65,7 @@ X_STD  = [1.000000, 1.000000, 1.000000]
 Y_MEAN = 0.000000
 Y_STD  = 1.000000
 
-# Capa 1: 3 entradas → 10 neuronas (sigmoid)
+# Capa 1: 3 entradas → 10 neuronas (relu)
 W1 = [
     [0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000],
     [0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000],
@@ -74,7 +73,7 @@ W1 = [
 ]
 B1 = [0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000]
 
-# Capa 2: 10 entradas → 6 neuronas (sigmoid)
+# Capa 2: 10 entradas → 6 neuronas (relu)
 W2 = [
     [0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000],
     [0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000],
@@ -104,12 +103,8 @@ B3 = [0.000000]
 #  FORWARD PASS DE LA RED NEURONAL (sin numpy, compatible MicroPython)
 # =====================================================================
 
-def sigmoid(x):
-    if x > 20.0:
-        return 1.0
-    if x < -20.0:
-        return 0.0
-    return 1.0 / (1.0 + math.exp(-x))
+def relu(x):
+    return x if x > 0.0 else 0.0
 
 def _dense(inputs, weights, bias):
     """Multiplica vector inputs × matriz weights + bias. Retorna lista."""
@@ -128,8 +123,8 @@ def red_neuronal(error, deriv_f, integral):
 
     Pasos:
       1. Normalizar entradas
-      2. Capa oculta 1 (3→10, sigmoid)
-      3. Capa oculta 2 (10→6, sigmoid)
+      2. Capa oculta 1 (3→10, relu)
+      3. Capa oculta 2 (10→6, relu)
       4. Capa de salida (6→1, lineal)
       5. Desnormalizar salida
     """
@@ -140,13 +135,13 @@ def red_neuronal(error, deriv_f, integral):
         (integral - X_MEAN[2]) / X_STD[2],
     ]
 
-    # 2. Capa oculta 1: 3→10, sigmoid
+    # 2. Capa oculta 1: 3→10, relu
     h1 = _dense(x, W1, B1)
-    h1 = [sigmoid(v) for v in h1]
+    h1 = [relu(v) for v in h1]
 
-    # 3. Capa oculta 2: 10→6, sigmoid
+    # 3. Capa oculta 2: 10→6, relu
     h2 = _dense(h1, W2, B2)
-    h2 = [sigmoid(v) for v in h2]
+    h2 = [relu(v) for v in h2]
 
     # 4. Capa de salida: 6→1, lineal
     out = _dense(h2, W3, B3)

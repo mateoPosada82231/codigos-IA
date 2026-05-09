@@ -52,12 +52,11 @@ class ActivationLayer(Layer):
 # =========================
 # FUNCIONES DE ACTIVACIÓN Y PÉRDIDA
 # =========================
-def sigmoid(x):
-    return 1 / (1 + np.exp(-np.clip(x, -500, 500)))
+def relu(x):
+    return np.maximum(0, x)
 
-def sigmoid_prime(x):
-    s = sigmoid(x)
-    return s * (1 - s)
+def relu_prime(x):
+    return (x > 0).astype(x.dtype)
 
 def linear(x):
     return x
@@ -162,13 +161,13 @@ x_train = X_norm.reshape(-1, 1, 3)
 y_train = Y_norm.reshape(-1, 1, 1)
 
 # =========================
-# MODELO — FCLayer(3→10) → Sigmoid → FCLayer(10→6) → Sigmoid → FCLayer(6→1) → Lineal
+# MODELO — FCLayer(3→10) → ReLU → FCLayer(10→6) → ReLU → FCLayer(6→1) → Lineal
 # =========================
 net = Network()
 net.add(FCLayer(3, 10))
-net.add(ActivationLayer(sigmoid, sigmoid_prime))
+net.add(ActivationLayer(relu, relu_prime))
 net.add(FCLayer(10, 6))
-net.add(ActivationLayer(sigmoid, sigmoid_prime))
+net.add(ActivationLayer(relu, relu_prime))
 net.add(FCLayer(6, 1))
 net.add(ActivationLayer(linear, linear_prime))
 net.use(mse, mse_prime)
