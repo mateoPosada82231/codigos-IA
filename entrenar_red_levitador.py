@@ -186,16 +186,16 @@ if ACTIVACION not in ACTIVACIONES_VALIDAS:
 
 if ACTIVACION == "relu":
     act_fn, act_prime = relu, relu_prime
-    DEFAULT_EPOCHS = 1000
+    DEFAULT_EPOCHS = 2000
     DEFAULT_LR = 0.001
 elif ACTIVACION == "tanh":
     act_fn, act_prime = tanh_act, tanh_prime
-    DEFAULT_EPOCHS = 500
-    DEFAULT_LR = 0.01
+    DEFAULT_EPOCHS = 1500
+    DEFAULT_LR = 0.005
 else:
     act_fn, act_prime = sigmoid, sigmoid_prime
-    DEFAULT_EPOCHS = 500
-    DEFAULT_LR = 0.01
+    DEFAULT_EPOCHS = 1500
+    DEFAULT_LR = 0.005
 
 EPOCHS = int(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_EPOCHS
 LR     = float(sys.argv[3]) if len(sys.argv) > 3 else DEFAULT_LR
@@ -203,14 +203,16 @@ LR     = float(sys.argv[3]) if len(sys.argv) > 3 else DEFAULT_LR
 print(f"Activación oculta: {ACTIVACION}  |  épocas: {EPOCHS}  |  lr: {LR}")
 
 # =========================
-# MODELO — FCLayer(3→10) → Act → FCLayer(10→6) → Act → FCLayer(6→1) → Lineal
+# MODELO — FCLayer(3→16) → Act → FCLayer(16→12) → Act → FCLayer(12→8) → Act → FCLayer(8→1) → Lineal
 # =========================
 net = Network()
-net.add(FCLayer(3, 10))
+net.add(FCLayer(3, 16))
 net.add(ActivationLayer(act_fn, act_prime))
-net.add(FCLayer(10, 6))
+net.add(FCLayer(16, 12))
 net.add(ActivationLayer(act_fn, act_prime))
-net.add(FCLayer(6, 1))
+net.add(FCLayer(12, 8))
+net.add(ActivationLayer(act_fn, act_prime))
+net.add(FCLayer(8, 1))
 net.add(ActivationLayer(linear, linear_prime))
 net.use(mse, mse_prime)
 

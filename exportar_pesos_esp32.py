@@ -29,7 +29,7 @@ print(f"X_STD  = [{', '.join(f'{v:.6f}' for v in X_std)}]")
 print(f"Y_MEAN = {Y_mean:.6f}")
 print(f"Y_STD  = {Y_std:.6f}\n")
 
-for idx, (W, b) in enumerate(layers):
+for idx, (W, b) in enumerate(datos['layers']):
     rows, cols = W.shape
     print(f"W{idx+1} = [")
     for r in range(rows):
