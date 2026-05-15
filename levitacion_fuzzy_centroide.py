@@ -279,8 +279,8 @@ try:
         if ciclos % 100 == 0:
             gc.collect()
 
-        print("{:7.2f} | {:6.2f} | {:+7.2f} | {:+7.2f} | {:+7.2f} | {:+7.2f} | {:7.2f}".format(
-            tiempo_actual, dist, error, deriv_f, integral, delta_pwm, pwm_actual))
+        print("PWM: {:7.2f} | Distancia: {:6.2f} | Error: {:+7.2f}".format(
+            pwm_actual, dist, error))
 
         # Compensar tiempo de loop
         transcurrido = time.ticks_diff(time.ticks_ms(), t_ahora) / 1000.0
