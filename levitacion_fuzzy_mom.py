@@ -200,6 +200,7 @@ try:
 
         dist = medir_cm()
         if dist < 0:
+            print("Sin lectura válida del sensor | PWM: {:7.2f} | rechazos: {}".format(pwm_actual, rechazos))
             time.sleep(DT_TARGET)
             continue
 
