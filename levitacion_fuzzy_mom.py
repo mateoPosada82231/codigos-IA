@@ -301,6 +301,6 @@ except KeyboardInterrupt:
                 for d in data_log:
                     f.write("{:.3f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f}\n".format(
                         d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7]))
-            print("Guardado con exito en el ESP32.")
+            print("Guardado con éxito en el ESP32.")
         except Exception as e:
             print("Error al guardar:", e)
