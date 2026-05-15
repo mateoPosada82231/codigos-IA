@@ -279,7 +279,11 @@ try:
 
         # 2. Integral con anti-windup
         if abs(error) < 10.0:
-            integral += error * dt_real
+            integral_inc = error * dt_real
+            # Anti-windup: no acumular en la dirección de saturación
+            if not (pwm_actual >= PWM_MAX and integral_inc > 0) and \
+               not (pwm_actual <= PWM_MIN and integral_inc < 0):
+                integral += integral_inc
             integral *= INTEGRAL_DECAY
             if integral > INTEGRAL_MAX:
                 integral = INTEGRAL_MAX
