@@ -160,7 +160,7 @@ def red_neuronal(error, deriv_f, integral):
         (integral - X_MEAN[2]) / X_STD[2],
     ]
 
-    # 2. Capa oculta 1: 3→10, sigmoid
+    # 2. Capa oculta 1: 3→10, activación configurable
     h1 = _dense(x, W1, B1)
     h1 = [activar(v) for v in h1]
 
