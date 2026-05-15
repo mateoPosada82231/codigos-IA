@@ -69,7 +69,7 @@ X_STD  = [1.000000, 1.000000, 1.000000]
 Y_MEAN = 0.000000
 Y_STD  = 1.000000
 
-# Capa 1: 3 entradas → 10 neuronas (sigmoid)
+# Capa 1: 3 entradas → 10 neuronas (activación configurable)
 W1 = [
     [0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000],
     [0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000],
@@ -77,7 +77,7 @@ W1 = [
 ]
 B1 = [0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000]
 
-# Capa 2: 10 entradas → 6 neuronas (sigmoid)
+# Capa 2: 10 entradas → 6 neuronas (activación configurable)
 W2 = [
     [0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000],
     [0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000],
@@ -148,8 +148,8 @@ def red_neuronal(error, deriv_f, integral):
 
     Pasos:
       1. Normalizar entradas
-      2. Capa oculta 1 (3→10, sigmoid)
-      3. Capa oculta 2 (10→6, sigmoid)
+      2. Capa oculta 1 (3→10, activación configurable)
+      3. Capa oculta 2 (10→6, activación configurable)
       4. Capa de salida (6→1, lineal)
       5. Desnormalizar salida
     """
