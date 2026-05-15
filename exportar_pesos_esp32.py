@@ -1,13 +1,16 @@
 import pickle
 import numpy as np
+import sys
 
 # =========================
 # LEER PESOS GUARDADOS
+# Uso: python exportar_pesos_esp32.py [archivo.pkl]
+# Por defecto: pesos_levitador_sigmoid.pkl
 # =========================
-with open('pesos_levitador.pkl', 'rb') as f:
-    datos = pickle.load(f)
+pkl_file = sys.argv[1] if len(sys.argv) > 1 else 'pesos_levitador_sigmoid.pkl'
 
-layers = datos['layers']
+with open(pkl_file, 'rb') as f:
+    datos = pickle.load(f)
 X_mean = datos['X_mean']
 X_std  = datos['X_std']
 Y_mean = datos['Y_mean']

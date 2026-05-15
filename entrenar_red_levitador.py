@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import csv
 import os
 import pickle
+import sys
 
 # =========================
 # BASE LAYER
@@ -58,6 +59,18 @@ def sigmoid(x):
 def sigmoid_prime(x):
     s = sigmoid(x)
     return s * (1 - s)
+
+def relu(x):
+    return np.maximum(0, x)
+
+def relu_prime(x):
+    return (x > 0).astype(float)
+
+def tanh_act(x):
+    return np.tanh(x)
+
+def tanh_prime(x):
+    return 1 - np.tanh(x) ** 2
 
 def linear(x):
     return x
@@ -162,33 +175,61 @@ x_train = X_norm.reshape(-1, 1, 3)
 y_train = Y_norm.reshape(-1, 1, 1)
 
 # =========================
-# MODELO — FCLayer(3→10) → Sigmoid → FCLayer(10→6) → Sigmoid → FCLayer(6→1) → Lineal
+# ACTIVACIÓN CONFIGURABLE
+# Uso: python entrenar_red_levitador.py [sigmoid|relu|tanh] [epochs] [lr]
+# Por defecto: sigmoid, 500 épocas, lr=0.01 (relu usa lr=0.001 por defecto)
+# =========================
+ACTIVACION = sys.argv[1].lower() if len(sys.argv) > 1 else "sigmoid"
+ACTIVACIONES_VALIDAS = {"sigmoid", "relu", "tanh"}
+if ACTIVACION not in ACTIVACIONES_VALIDAS:
+    raise ValueError(f"Activación '{ACTIVACION}' no válida. Usa: {ACTIVACIONES_VALIDAS}")
+
+if ACTIVACION == "relu":
+    act_fn, act_prime = relu, relu_prime
+    DEFAULT_EPOCHS = 1000
+    DEFAULT_LR = 0.001
+elif ACTIVACION == "tanh":
+    act_fn, act_prime = tanh_act, tanh_prime
+    DEFAULT_EPOCHS = 500
+    DEFAULT_LR = 0.01
+else:
+    act_fn, act_prime = sigmoid, sigmoid_prime
+    DEFAULT_EPOCHS = 500
+    DEFAULT_LR = 0.01
+
+EPOCHS = int(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_EPOCHS
+LR     = float(sys.argv[3]) if len(sys.argv) > 3 else DEFAULT_LR
+
+print(f"Activación oculta: {ACTIVACION}  |  épocas: {EPOCHS}  |  lr: {LR}")
+
+# =========================
+# MODELO — FCLayer(3→10) → Act → FCLayer(10→6) → Act → FCLayer(6→1) → Lineal
 # =========================
 net = Network()
 net.add(FCLayer(3, 10))
-net.add(ActivationLayer(sigmoid, sigmoid_prime))
+net.add(ActivationLayer(act_fn, act_prime))
 net.add(FCLayer(10, 6))
-net.add(ActivationLayer(sigmoid, sigmoid_prime))
+net.add(ActivationLayer(act_fn, act_prime))
 net.add(FCLayer(6, 1))
 net.add(ActivationLayer(linear, linear_prime))
 net.use(mse, mse_prime)
 
 print("\nIniciando entrenamiento...")
-history = net.fit(x_train, y_train, epochs=500, learning_rate=0.01)
+history = net.fit(x_train, y_train, epochs=EPOCHS, learning_rate=LR)
 
 # =========================
 # GRÁFICA DE ENTRENAMIENTO
 # =========================
 plt.figure(figsize=(10, 4))
 plt.plot(history)
-plt.title('Error MSE durante entrenamiento')
+plt.title(f'Error MSE durante entrenamiento ({ACTIVACION})')
 plt.xlabel('Época')
 plt.ylabel('MSE')
 plt.grid(True)
 plt.tight_layout()
-plt.savefig('entrenamiento_levitador.png')
+plt.savefig(f'entrenamiento_levitador_{ACTIVACION}.png')
 plt.show()
-print("Gráfica guardada en entrenamiento_levitador.png")
+print(f"Gráfica guardada en entrenamiento_levitador_{ACTIVACION}.png")
 
 # =========================
 # GRÁFICA COMPARACIÓN FUZZY VS RED NEURONAL
@@ -200,25 +241,27 @@ reales = Y_all.flatten()
 plt.figure(figsize=(12, 4))
 plt.plot(reales[:200], label='delta_pwm real (Fuzzy)', alpha=0.7)
 plt.plot(preds[:200],  label='delta_pwm Red Neuronal', alpha=0.7)
-plt.title('Comparación: Fuzzy vs Red Neuronal')
+plt.title(f'Comparación: Fuzzy vs Red Neuronal ({ACTIVACION})')
 plt.xlabel('Muestra')
 plt.ylabel('delta_pwm')
 plt.legend()
 plt.grid(True)
 plt.tight_layout()
-plt.savefig('comparacion_fuzzy_vs_rn.png')
+plt.savefig(f'comparacion_fuzzy_vs_rn_{ACTIVACION}.png')
 plt.show()
-print("Gráfica guardada en comparacion_fuzzy_vs_rn.png")
+print(f"Gráfica guardada en comparacion_fuzzy_vs_rn_{ACTIVACION}.png")
 
 # =========================
 # GUARDAR PESOS
 # =========================
-with open('pesos_levitador.pkl', 'wb') as f:
+pkl_file = f'pesos_levitador_{ACTIVACION}.pkl'
+with open(pkl_file, 'wb') as f:
     pickle.dump({
         'layers': [(l.weights, l.bias) for l in net.layers if isinstance(l, FCLayer)],
         'X_mean': X_mean,
         'X_std':  X_std,
         'Y_mean': float(Y_mean),
         'Y_std':  float(Y_std),
+        'activacion': ACTIVACION,
     }, f)
-print("Pesos guardados en pesos_levitador.pkl")
+print(f"Pesos guardados en {pkl_file}")
