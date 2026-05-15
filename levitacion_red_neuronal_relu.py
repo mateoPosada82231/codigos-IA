@@ -44,7 +44,6 @@ OUTLIER_THR = 5.0
 ALFA_DERIV = 0.40       # EMA de derivada
 
 # Integral
-KI             = 0.10
 INTEGRAL_MAX   = 40.0
 INTEGRAL_DECAY = 0.998
 
