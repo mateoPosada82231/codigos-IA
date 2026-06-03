@@ -48,7 +48,7 @@ else:
     Y_mean = datos['Y_mean']
     Y_std  = datos['Y_std']
     ACTIVACION = datos.get('activacion', ACTIVACION)
-    capas = datos['layers']
+    capas = [(np.array(W), np.array(b)) for W, b in datos['layers']]
 
 # =========================
 # GENERAR CÓDIGO MICROPYTHON
@@ -64,8 +64,7 @@ print(f"Y_MEAN = {Y_mean:.6f}")
 print(f"Y_STD  = {Y_std:.6f}\n")
 
 for idx, (W, b) in enumerate(capas):
-    W = np.array(W)
-    b_flat = np.array(b).flatten()
+    b_flat = b.flatten()
     rows, cols = W.shape
     print(f"W{idx+1} = [")
     for r in range(rows):

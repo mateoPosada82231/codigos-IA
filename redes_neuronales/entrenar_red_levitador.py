@@ -151,6 +151,8 @@ def _defuzzify_centroide(reglas):
     return (numerador / denominador) if denominador > 0 else 0.0
 
 # Singletons de salida (idénticos al algoritmo de referencia)
+# NV=Negative Very large, NB=Negative Big, NM=Negative Medium, NS=Negative Small,
+# Z=Zero, PS=Positive Small, PM=Positive Medium, PB=Positive Big, PV=Positive Very large
 _NV_out = -6.0
 _NB_out = -3.0
 _NM_out = -1.5
@@ -174,8 +176,7 @@ _FAM = [
     [_Z_out,  _Z_out,  _PS_out, _PM_out, _PB_out, _PV_out, _PV_out],
 ]
 
-_KI             = 0.10
-_INTEGRAL_MAX   = 40.0
+_KI = 0.10
 
 def fuzzy_centroide(error, deriv_f, integral):
     """Calcula delta_pwm usando el algoritmo fuzzy centroide de referencia."""
@@ -222,9 +223,14 @@ print("=" * 60)
 print("GENERANDO DATOS DE ENTRENAMIENTO DESDE LÓGICA DIFUSA CENTROIDE")
 print("=" * 60)
 
-errores   = np.linspace(-15.0,  15.0, 40)
-derivadas = np.linspace(-30.0,  30.0, 40)
-integrales= np.linspace(-20.0,  20.0, 20)
+# Parámetros del barrido de datos de entrenamiento
+_ERROR_MIN, _ERROR_MAX, _ERROR_SAMPLES       = -15.0,  15.0, 40
+_DERIV_MIN, _DERIV_MAX, _DERIV_SAMPLES       = -30.0,  30.0, 40
+_INTEG_MIN, _INTEG_MAX, _INTEG_SAMPLES       = -20.0,  20.0, 20
+
+errores   = np.linspace(_ERROR_MIN, _ERROR_MAX, _ERROR_SAMPLES)
+derivadas = np.linspace(_DERIV_MIN, _DERIV_MAX, _DERIV_SAMPLES)
+integrales= np.linspace(_INTEG_MIN, _INTEG_MAX, _INTEG_SAMPLES)
 
 X_list, Y_list = [], []
 for e in errores:
