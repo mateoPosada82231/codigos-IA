@@ -136,7 +136,8 @@ class DQNAgent:
         torch.save(self.model.state_dict(), name)
 
 # --- Entrenamiento DQN ---
-def entrenar_dqn(env, episodios=1000, batch_size=32, archivo_modelo="dqn_tres_sensores.pth"):
+def entrenar_dqn(env, episodios=1000, batch_size=32, archivo_modelo="dqn_tres_sensores.pth",
+                 max_pasos=200, actualizar_target_cada=10):
     state_size = 3 # Tres sensores, cada uno con un estado discreto (0-3)
     action_size = 5 # Cinco acciones posibles
     agent = DQNAgent(state_size, action_size)
@@ -150,17 +151,20 @@ def entrenar_dqn(env, episodios=1000, batch_size=32, archivo_modelo="dqn_tres_se
         done = False
         total_reward = 0
 
-        while not done:
+        for _ in range(max_pasos):
             action = agent.act(state)
             next_state, reward, done, _, _ = env.step(action)
             agent.remember(state, action, reward, next_state, done)
             state = next_state
             total_reward += reward
+            agent.replay(batch_size)
+            if done:
+                break
 
-        if done:
-            print(f"Episodio: {episodio + 1}, Recompensa total: {total_reward:.2f}, Epsilon: {agent.epsilon:.2f}")
+        print(f"Episodio: {episodio + 1}, Recompensa total: {total_reward:.2f}, Epsilon: {agent.epsilon:.2f}, Exito: {done}")
 
-        agent.replay(batch_size)
+        if (episodio + 1) % actualizar_target_cada == 0:
+            agent.update_target_model()
 
         if episodio % 100 == 0:
             agent.save(archivo_modelo)
