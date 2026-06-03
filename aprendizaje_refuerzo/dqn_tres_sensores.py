@@ -161,7 +161,7 @@ def entrenar_dqn(env, episodios=1000, batch_size=32, archivo_modelo="dqn_tres_se
             if done:
                 break
 
-        print(f"Episodio: {episodio + 1}, Recompensa total: {total_reward:.2f}, Epsilon: {agent.epsilon:.2f}, Exito: {done}")
+        print(f"Episodio: {episodio + 1}, Recompensa total: {total_reward:.2f}, Epsilon: {agent.epsilon:.2f}, Éxito: {done}")
 
         if (episodio + 1) % actualizar_target_cada == 0:
             agent.update_target_model()
