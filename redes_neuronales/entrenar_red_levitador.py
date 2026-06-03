@@ -1,8 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import csv
-import os
 import pickle
+import json
 import sys
 
 # =========================
@@ -124,41 +123,131 @@ class Network:
             err /= len(x_train)
             history.append(err)
             if (i + 1) % 50 == 0:
-                print(f"epoch {i+1}/{epochs}  MSE={err:.6f}")
+                print(f"  epoch {i+1}/{epochs}  MSE={err:.6f}")
         return history
 
 # =========================
-# CARGAR DATOS CSV
+# COPIA DEL MEJOR ALGORITMO DE LÓGICA DIFUSA (Centroide)
+# Traducción a Python puro del algoritmo levitacion_fuzzy_centroide.py
+# Genera datos de entrenamiento sin necesidad de archivos CSV externos
 # =========================
-def cargar_csv(filepath):
-    X, Y = [], []
-    with open(filepath, 'r') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            X.append([float(row['error']), float(row['derivada']), float(row['integral'])])
-            Y.append([float(row['delta_pwm'])])
-    return np.array(X, dtype='float32'), np.array(Y, dtype='float32')
 
-archivos = [
-    'datos_levitacion_10cm.csv',
-    'datos_levitacion_15cm.csv',
-    'datos_levitacion_20cm.csv',
+def _trapmf(x, a, b, c, d):
+    if x <= a or x >= d:
+        return 0.0
+    if a < x <= b:
+        return (x - a) / (b - a) if b != a else 1.0
+    if b < x <= c:
+        return 1.0
+    if c < x < d:
+        return (d - x) / (d - c) if d != c else 1.0
+    return 0.0
+
+def _defuzzify_centroide(reglas):
+    if not reglas:
+        return 0.0
+    numerador   = sum(peso * valor for peso, valor in reglas)
+    denominador = sum(peso          for peso, _     in reglas)
+    return (numerador / denominador) if denominador > 0 else 0.0
+
+# Singletons de salida (idénticos al algoritmo de referencia)
+# NV=Negative Very large, NB=Negative Big, NM=Negative Medium, NS=Negative Small,
+# Z=Zero, PS=Positive Small, PM=Positive Medium, PB=Positive Big, PV=Positive Very large
+_NV_out = -6.0
+_NB_out = -3.0
+_NM_out = -1.5
+_NS_out = -0.5
+_Z_out  =  0.0
+_PS_out =  0.8
+_PM_out =  2.5
+_PB_out =  6.0
+_PV_out = 18.0
+
+# Matriz FAM (9 niveles de error × 7 niveles de derivada)
+_FAM = [
+    [_NV_out, _NV_out, _NB_out, _NM_out, _NS_out, _Z_out,  _Z_out ],
+    [_NV_out, _NB_out, _NM_out, _NS_out, _Z_out,  _Z_out,  _PS_out],
+    [_NB_out, _NM_out, _NS_out, _NS_out, _Z_out,  _PS_out, _PM_out],
+    [_NM_out, _NS_out, _NS_out, _Z_out,  _Z_out,  _PS_out, _PM_out],
+    [_NM_out, _NS_out, _Z_out,  _Z_out,  _Z_out,  _PS_out, _PM_out],
+    [_NM_out, _NS_out, _Z_out,  _Z_out,  _PS_out, _PS_out, _PM_out],
+    [_NM_out, _NS_out, _Z_out,  _PS_out, _PS_out, _PM_out, _PB_out],
+    [_NS_out, _Z_out,  _Z_out,  _PS_out, _PM_out, _PB_out, _PV_out],
+    [_Z_out,  _Z_out,  _PS_out, _PM_out, _PB_out, _PV_out, _PV_out],
 ]
 
-X_all, Y_all = [], []
-for archivo in archivos:
-    if os.path.exists(archivo):
-        X, Y = cargar_csv(archivo)
-        X_all.append(X)
-        Y_all.append(Y)
-        print(f"Cargado {archivo}: {len(X)} muestras")
+_KI = 0.10
 
-if not X_all:
-    raise RuntimeError("No se encontró ningún CSV de datos. Asegúrate de que los archivos existen.")
+def fuzzy_centroide(error, deriv_f, integral):
+    """Calcula delta_pwm usando el algoritmo fuzzy centroide de referencia."""
+    e_niveles = [
+        _trapmf(error, -50, -50, -15, -8),
+        _trapmf(error, -12,  -9,  -7, -4),
+        _trapmf(error,  -6,-4.5,-3.5,-1.5),
+        _trapmf(error,-2.5,-1.5,-0.5,  0),
+        _trapmf(error,  -1,-0.3, 0.3,  1),
+        _trapmf(error,   0, 0.5, 1.5,2.5),
+        _trapmf(error, 1.5,   3,   5,  6),
+        _trapmf(error,   4,   6,  10, 12),
+        _trapmf(error,   8,  15,  50, 50),
+    ]
+    de_niveles = [
+        _trapmf(deriv_f, -80, -80, -25, -10),
+        _trapmf(deriv_f, -20, -12,  -8,  -3),
+        _trapmf(deriv_f,  -6,  -4,  -2,   0),
+        _trapmf(deriv_f,-1.5,-0.5, 0.5, 1.5),
+        _trapmf(deriv_f,   0,   2,   4,   6),
+        _trapmf(deriv_f,   3,   7,  13,  20),
+        _trapmf(deriv_f,  10,  25,  80,  80),
+    ]
+    reglas = []
+    for i in range(9):
+        ei = e_niveles[i]
+        if ei <= 0:
+            continue
+        for j in range(7):
+            peso = min(ei, de_niveles[j])
+            if peso > 0:
+                reglas.append((peso, _FAM[i][j]))
 
-X_all = np.concatenate(X_all, axis=0)
-Y_all = np.concatenate(Y_all, axis=0)
-print(f"Total muestras: {len(X_all)}")
+    delta_fuzzy    = _defuzzify_centroide(reglas)
+    delta_integral = _KI * integral
+    return delta_fuzzy + delta_integral
+
+# =========================
+# GENERAR DATOS DESDE LA LÓGICA DIFUSA
+# Se barre el espacio de entradas (error, derivada, integral) para obtener
+# el delta_pwm que produce el algoritmo fuzzy de referencia.
+# =========================
+print("=" * 60)
+print("GENERANDO DATOS DE ENTRENAMIENTO DESDE LÓGICA DIFUSA CENTROIDE")
+print("=" * 60)
+
+# Parámetros del barrido de datos de entrenamiento
+_ERROR_MIN, _ERROR_MAX, _ERROR_SAMPLES       = -15.0,  15.0, 40
+_DERIV_MIN, _DERIV_MAX, _DERIV_SAMPLES       = -30.0,  30.0, 40
+_INTEG_MIN, _INTEG_MAX, _INTEG_SAMPLES       = -20.0,  20.0, 20
+
+errores   = np.linspace(_ERROR_MIN, _ERROR_MAX, _ERROR_SAMPLES)
+derivadas = np.linspace(_DERIV_MIN, _DERIV_MAX, _DERIV_SAMPLES)
+integrales= np.linspace(_INTEG_MIN, _INTEG_MAX, _INTEG_SAMPLES)
+
+X_list, Y_list = [], []
+for e in errores:
+    for d in derivadas:
+        for it in integrales:
+            dp = fuzzy_centroide(float(e), float(d), float(it))
+            X_list.append([e, d, it])
+            Y_list.append([dp])
+
+X_all = np.array(X_list, dtype='float32')
+Y_all = np.array(Y_list, dtype='float32')
+print(f"Total muestras generadas: {len(X_all)}")
+
+# Mezclar aleatoriamente
+idx = np.random.permutation(len(X_all))
+X_all = X_all[idx]
+Y_all = Y_all[idx]
 
 # =========================
 # NORMALIZACIÓN
@@ -175,95 +264,130 @@ x_train = X_norm.reshape(-1, 1, 3)
 y_train = Y_norm.reshape(-1, 1, 1)
 
 # =========================
-# ACTIVACIÓN CONFIGURABLE
-# Uso: python entrenar_red_levitador.py [sigmoid|relu|tanh] [epochs] [lr]
-# Por defecto: sigmoid, 500 épocas, lr=0.01 (relu usa lr=0.001 por defecto)
+# CONFIGURACIÓN DE ACTIVACIONES A ENTRENAR
+# Se entrenan las 3 variantes con los mismos datos fuzzy.
+# Opcionalmente se puede pasar una como argumento para entrenar solo esa.
+# Uso: python entrenar_red_levitador.py [sigmoid|relu|tanh|all] [epochs] [lr]
 # =========================
-ACTIVACION = sys.argv[1].lower() if len(sys.argv) > 1 else "sigmoid"
-ACTIVACIONES_VALIDAS = {"sigmoid", "relu", "tanh"}
-if ACTIVACION not in ACTIVACIONES_VALIDAS:
-    raise ValueError(f"Activación '{ACTIVACION}' no válida. Usa: {ACTIVACIONES_VALIDAS}")
+ARG_ACT = sys.argv[1].lower() if len(sys.argv) > 1 else "all"
+ACTIVACIONES_VALIDAS = {"sigmoid", "relu", "tanh", "all"}
+if ARG_ACT not in ACTIVACIONES_VALIDAS:
+    raise ValueError(f"Activación '{ARG_ACT}' no válida. Usa: {ACTIVACIONES_VALIDAS}")
 
-if ACTIVACION == "relu":
-    act_fn, act_prime = relu, relu_prime
-    DEFAULT_EPOCHS = 2000
-    DEFAULT_LR = 0.001
-elif ACTIVACION == "tanh":
-    act_fn, act_prime = tanh_act, tanh_prime
-    DEFAULT_EPOCHS = 1500
-    DEFAULT_LR = 0.005
+CONFIGS = {
+    "sigmoid": {"epochs": 1500, "lr": 0.005, "act_fn": sigmoid, "act_prime": sigmoid_prime},
+    "relu":    {"epochs": 2000, "lr": 0.001, "act_fn": relu,    "act_prime": relu_prime},
+    "tanh":    {"epochs": 1500, "lr": 0.005, "act_fn": tanh_act,"act_prime": tanh_prime},
+}
+if ARG_ACT == "all":
+    activaciones_a_entrenar = list(CONFIGS.keys())
 else:
-    act_fn, act_prime = sigmoid, sigmoid_prime
-    DEFAULT_EPOCHS = 1500
-    DEFAULT_LR = 0.005
-
-EPOCHS = int(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_EPOCHS
-LR     = float(sys.argv[3]) if len(sys.argv) > 3 else DEFAULT_LR
-
-print(f"Activación oculta: {ACTIVACION}  |  épocas: {EPOCHS}  |  lr: {LR}")
+    activaciones_a_entrenar = [ARG_ACT]
+    if len(sys.argv) > 2:
+        CONFIGS[ARG_ACT]["epochs"] = int(sys.argv[2])
+    if len(sys.argv) > 3:
+        CONFIGS[ARG_ACT]["lr"] = float(sys.argv[3])
 
 # =========================
-# MODELO — FCLayer(3→16) → Act → FCLayer(16→12) → Act → FCLayer(12→8) → Act → FCLayer(8→1) → Lineal
+# ARCHIVO COMPARTIDO DE PESOS
+# Todos los algoritmos de redes neuronales pueden leer de aquí.
 # =========================
-net = Network()
-net.add(FCLayer(3, 16))
-net.add(ActivationLayer(act_fn, act_prime))
-net.add(FCLayer(16, 12))
-net.add(ActivationLayer(act_fn, act_prime))
-net.add(FCLayer(12, 8))
-net.add(ActivationLayer(act_fn, act_prime))
-net.add(FCLayer(8, 1))
-net.add(ActivationLayer(linear, linear_prime))
-net.use(mse, mse_prime)
-
-print("\nIniciando entrenamiento...")
-history = net.fit(x_train, y_train, epochs=EPOCHS, learning_rate=LR)
+PESOS_JSON = 'pesos_red_levitador.json'
+try:
+    with open(PESOS_JSON, 'r') as f:
+        pesos_compartidos = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    pesos_compartidos = {}
 
 # =========================
-# GRÁFICA DE ENTRENAMIENTO
+# ENTRENAR CADA VARIANTE
 # =========================
-plt.figure(figsize=(10, 4))
-plt.plot(history)
-plt.title(f'Error MSE durante entrenamiento ({ACTIVACION})')
-plt.xlabel('Época')
-plt.ylabel('MSE')
-plt.grid(True)
-plt.tight_layout()
-plt.savefig(f'entrenamiento_levitador_{ACTIVACION}.png')
-plt.show()
-print(f"Gráfica guardada en entrenamiento_levitador_{ACTIVACION}.png")
+for ACTIVACION in activaciones_a_entrenar:
+    cfg    = CONFIGS[ACTIVACION]
+    EPOCHS = cfg["epochs"]
+    LR     = cfg["lr"]
+    act_fn      = cfg["act_fn"]
+    act_prime   = cfg["act_prime"]
 
-# =========================
-# GRÁFICA COMPARACIÓN FUZZY VS RED NEURONAL
-# =========================
-preds_norm = net.predict(x_train)
-preds = np.array([p[0][0] for p in preds_norm]) * Y_std + Y_mean
-reales = Y_all.flatten()
+    print(f"\n{'='*60}")
+    print(f"Entrenando red: {ACTIVACION.upper()}  |  épocas: {EPOCHS}  |  lr: {LR}")
+    print('='*60)
 
-plt.figure(figsize=(12, 4))
-plt.plot(reales[:200], label='delta_pwm real (Fuzzy)', alpha=0.7)
-plt.plot(preds[:200],  label='delta_pwm Red Neuronal', alpha=0.7)
-plt.title(f'Comparación: Fuzzy vs Red Neuronal ({ACTIVACION})')
-plt.xlabel('Muestra')
-plt.ylabel('delta_pwm')
-plt.legend()
-plt.grid(True)
-plt.tight_layout()
-plt.savefig(f'comparacion_fuzzy_vs_rn_{ACTIVACION}.png')
-plt.show()
-print(f"Gráfica guardada en comparacion_fuzzy_vs_rn_{ACTIVACION}.png")
+    # Modelo — FCLayer(3→16) → Act → FCLayer(16→12) → Act → FCLayer(12→8) → Act → FCLayer(8→1) → Lineal
+    net = Network()
+    net.add(FCLayer(3, 16))
+    net.add(ActivationLayer(act_fn, act_prime))
+    net.add(FCLayer(16, 12))
+    net.add(ActivationLayer(act_fn, act_prime))
+    net.add(FCLayer(12, 8))
+    net.add(ActivationLayer(act_fn, act_prime))
+    net.add(FCLayer(8, 1))
+    net.add(ActivationLayer(linear, linear_prime))
+    net.use(mse, mse_prime)
 
-# =========================
-# GUARDAR PESOS
-# =========================
-pkl_file = f'pesos_levitador_{ACTIVACION}.pkl'
-with open(pkl_file, 'wb') as f:
-    pickle.dump({
-        'layers': [(l.weights, l.bias) for l in net.layers if isinstance(l, FCLayer)],
-        'X_mean': X_mean,
-        'X_std':  X_std,
-        'Y_mean': float(Y_mean),
-        'Y_std':  float(Y_std),
+    history = net.fit(x_train, y_train, epochs=EPOCHS, learning_rate=LR)
+
+    # Gráfica de entrenamiento
+    plt.figure(figsize=(10, 4))
+    plt.plot(history)
+    plt.title(f'Error MSE durante entrenamiento ({ACTIVACION})')
+    plt.xlabel('Época')
+    plt.ylabel('MSE')
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(f'entrenamiento_levitador_{ACTIVACION}.png')
+    plt.close()
+    print(f"Gráfica guardada en entrenamiento_levitador_{ACTIVACION}.png")
+
+    # Gráfica comparación fuzzy vs red neuronal
+    preds_norm = net.predict(x_train)
+    preds  = np.array([p[0][0] for p in preds_norm]) * Y_std + Y_mean
+    reales = Y_all.flatten()
+
+    plt.figure(figsize=(12, 4))
+    plt.plot(reales[:200], label='delta_pwm Fuzzy (referencia)', alpha=0.7)
+    plt.plot(preds[:200],  label=f'delta_pwm Red Neuronal ({ACTIVACION})', alpha=0.7)
+    plt.title(f'Comparación: Fuzzy vs Red Neuronal ({ACTIVACION})')
+    plt.xlabel('Muestra')
+    plt.ylabel('delta_pwm')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(f'comparacion_fuzzy_vs_rn_{ACTIVACION}.png')
+    plt.close()
+    print(f"Gráfica guardada en comparacion_fuzzy_vs_rn_{ACTIVACION}.png")
+
+    # --- Guardar pesos en archivo .pkl individual (compatibilidad con exportar_pesos_esp32.py) ---
+    pkl_file = f'pesos_levitador_{ACTIVACION}.pkl'
+    capas_fc = [(l.weights, l.bias) for l in net.layers if isinstance(l, FCLayer)]
+    with open(pkl_file, 'wb') as f:
+        pickle.dump({
+            'layers':    capas_fc,
+            'X_mean':    X_mean,
+            'X_std':     X_std,
+            'Y_mean':    float(Y_mean),
+            'Y_std':     float(Y_std),
+            'activacion': ACTIVACION,
+        }, f)
+    print(f"Pesos guardados en {pkl_file}")
+
+    # --- Guardar en archivo compartido JSON ---
+    pesos_compartidos[ACTIVACION] = {
         'activacion': ACTIVACION,
-    }, f)
-print(f"Pesos guardados en {pkl_file}")
+        'X_mean':     X_mean.tolist(),
+        'X_std':      X_std.tolist(),
+        'Y_mean':     float(Y_mean),
+        'Y_std':      float(Y_std),
+        'layers': [
+            {
+                'W': W.tolist(),
+                'b': b.flatten().tolist(),
+            }
+            for W, b in capas_fc
+        ],
+    }
+
+with open(PESOS_JSON, 'w') as f:
+    json.dump(pesos_compartidos, f, indent=2)
+print(f"\nPesos de todas las redes guardados en {PESOS_JSON}")
+print("Los algoritmos de redes neuronales pueden leer sus pesos desde ese archivo.")
