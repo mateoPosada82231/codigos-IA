@@ -2,6 +2,7 @@ from machine import Pin, PWM, time_pulse_us
 import time
 import gc
 import math
+import array
 
 # =====================================================================
 #  LEVITACIÓN DE PELOTA — Controlador Red Neuronal (reemplaza Fuzzy)
@@ -51,9 +52,12 @@ buf = []
 rechazos = 0
 MAX_RECHAZOS = 5
 
-# --- Gestión de memoria para CSV ---
-data_log = []
-MAX_LOGS = 1200
+# --- Gestión de memoria para CSV (ring buffer en array, sin fragmentar heap) ---
+MAX_LOGS   = 300
+_LOG_N     = 8
+_log_buf   = array.array('f', [0.0] * (MAX_LOGS * _LOG_N))
+_log_idx   = 0
+_log_count = 0
 
 # =====================================================================
 #  PESOS DE LA RED NEURONAL
@@ -148,54 +152,47 @@ def activar(x):
         return relu(x)
     return sigmoid(x)
 
-def _dense(inputs, weights, bias):
-    """Multiplica vector inputs × matriz weights + bias. Retorna lista."""
+# Buffers pre-asignados: evitan allocar heap en cada ciclo del loop
+_x  = array.array('f', [0.0, 0.0, 0.0])
+_h1 = array.array('f', [0.0] * 16)
+_h2 = array.array('f', [0.0] * 12)
+_h3 = array.array('f', [0.0] * 8)
+
+def _dense_into(inputs, weights, bias, out):
+    """Multiplica inputs × weights + bias, escribe resultado en out (sin heap)."""
     n_out = len(bias)
     n_in  = len(inputs)
-    out = []
     for j in range(n_out):
         s = bias[j]
         for i in range(n_in):
             s += inputs[i] * weights[i][j]
-        out.append(s)
-    return out
+        out[j] = s
 
 def red_neuronal(error, deriv_f, integral):
-    """Calcula delta_pwm usando la red neuronal entrenada.
-
-    Pasos:
-      1. Normalizar entradas
-      2. Capa oculta 1 (3→16, activación configurable)
-      3. Capa oculta 2 (16→12, activación configurable)
-      4. Capa oculta 3 (12→8, activación configurable)
-      5. Capa de salida (8→1, lineal)
-      6. Desnormalizar salida
-    """
     # 1. Normalizar entradas
-    x = [
-        (error    - X_MEAN[0]) / X_STD[0],
-        (deriv_f  - X_MEAN[1]) / X_STD[1],
-        (integral - X_MEAN[2]) / X_STD[2],
-    ]
+    _x[0] = (error    - X_MEAN[0]) / X_STD[0]
+    _x[1] = (deriv_f  - X_MEAN[1]) / X_STD[1]
+    _x[2] = (integral - X_MEAN[2]) / X_STD[2]
 
-    # 2. Capa oculta 1: 3→16, activación configurable
-    h1 = _dense(x, W1, B1)
-    h1 = [activar(v) for v in h1]
+    # 2. Capa oculta 1: 3→16
+    _dense_into(_x, W1, B1, _h1)
+    for j in range(16): _h1[j] = activar(_h1[j])
 
     # 3. Capa oculta 2: 16→12
-    h2 = _dense(h1, W2, B2)
-    h2 = [activar(v) for v in h2]
+    _dense_into(_h1, W2, B2, _h2)
+    for j in range(12): _h2[j] = activar(_h2[j])
 
     # 4. Capa oculta 3: 12→8
-    h3 = _dense(h2, W3, B3)
-    h3 = [activar(v) for v in h3]
+    _dense_into(_h2, W3, B3, _h3)
+    for j in range(8): _h3[j] = activar(_h3[j])
 
     # 5. Capa de salida: 8→1, lineal
-    out = _dense(h3, W4, B4)
+    s = B4[0]
+    for i in range(8):
+        s += _h3[i] * W4[i][0]
 
-    # 6. Desnormalizar salida
-    delta_pwm = out[0] * Y_STD + Y_MEAN
-    return delta_pwm
+    # 6. Desnormalizar
+    return s * Y_STD + Y_MEAN
 
 # =====================================================================
 #  FUNCIÓN DE MEDICIÓN (idéntica a levitacion7niveles.py)
@@ -265,11 +262,19 @@ error_ant  = 0.0
 deriv_f    = 0.0
 integral   = 0.0
 fan.duty(int(ELEVACION_PWM))
-print("Elevación inicial al máximo PWM...")
-time.sleep(ELEVACION_SEGUNDOS)
-pwm_actual = 400.0
+print("Elevacion inicial al maximo PWM (3 s)...")
+time.sleep(3.0)
+print("Bajando suavemente hacia zona de control...")
+_pwm_ramp_fin = float(PWM_MIN + (PWM_MAX - PWM_MIN) * 0.45)
+_pasos_ramp   = 60   # 60 x 50 ms = 3 s de rampa
+_delta_ramp   = (float(PWM_MAX) - _pwm_ramp_fin) / _pasos_ramp
+for _i in range(_pasos_ramp):
+    pwm_actual = float(PWM_MAX) - _delta_ramp * _i
+    fan.duty(int(pwm_actual))
+    time.sleep_ms(50)
+pwm_actual = _pwm_ramp_fin
 fan.duty(int(pwm_actual))
-time.sleep(0.3)
+print("Rampa completada. Iniciando control...")
 
 t_inicio   = time.ticks_ms()
 t_anterior = time.ticks_ms()
@@ -330,10 +335,18 @@ try:
         fan.duty(int(pwm_actual))
 
         # Logging protegido
-        data_log.append((tiempo_actual, dist, setpoint, error, deriv_f, integral, delta_pwm, pwm_actual))
-
-        if len(data_log) > MAX_LOGS:
-            data_log.pop(0)
+        _base = _log_idx * _LOG_N
+        _log_buf[_base]   = tiempo_actual
+        _log_buf[_base+1] = dist
+        _log_buf[_base+2] = setpoint
+        _log_buf[_base+3] = error
+        _log_buf[_base+4] = deriv_f
+        _log_buf[_base+5] = integral
+        _log_buf[_base+6] = delta_pwm
+        _log_buf[_base+7] = pwm_actual
+        _log_idx = (_log_idx + 1) % MAX_LOGS
+        if _log_count < MAX_LOGS:
+            _log_count += 1
 
         ciclos += 1
         if ciclos % 100 == 0:
@@ -353,14 +366,17 @@ except KeyboardInterrupt:
     fan.deinit()
     print("\nMotor detenido. Aterrizaje seguro.")
 
-    resp = input("Guardar {} datos en CSV? (s/n): ".format(len(data_log))).strip().lower()
+    resp = input("Guardar {} datos en CSV? (s/n): ".format(_log_count)).strip().lower()
     if resp == 's':
         try:
+            _start = (_log_idx - _log_count) % MAX_LOGS if _log_count == MAX_LOGS else 0
             with open("datos_levitacion.csv", "w") as f:
                 f.write("tiempo,distancia,setpoint,error,derivada,integral,delta_pwm,pwm\n")
-                for d in data_log:
+                for i in range(_log_count):
+                    _b = ((_start + i) % MAX_LOGS) * _LOG_N
                     f.write("{:.3f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f}\n".format(
-                        d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7]))
-            print("Guardado con éxito en el ESP32.")
+                        _log_buf[_b], _log_buf[_b+1], _log_buf[_b+2], _log_buf[_b+3],
+                        _log_buf[_b+4], _log_buf[_b+5], _log_buf[_b+6], _log_buf[_b+7]))
+            print("Guardado con exito en el ESP32.")
         except Exception as e:
             print("Error al guardar:", e)

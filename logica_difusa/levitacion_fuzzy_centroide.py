@@ -1,6 +1,7 @@
 from machine import Pin, PWM, time_pulse_us
 import time
 import gc
+import array
 
 # =====================================================================
 #  LEVITACIÓN DE PELOTA — Fuzzy PID con 9 niveles de error
@@ -19,7 +20,7 @@ fan = PWM(Pin(FAN_PIN), freq=25000, duty=0)
 # Variables de control
 DT_TARGET = 0.05        # Período objetivo (20 Hz)
 PWM_MAX   = 900
-PWM_MIN   = 230
+PWM_MIN   = 200
 ELEVACION_PWM = PWM_MAX
 ELEVACION_SEGUNDOS = 1.8
 DEFUZZ_METHOD = "centroid"
@@ -42,9 +43,12 @@ buf = []
 rechazos = 0           # Contador de lecturas rechazadas consecutivas
 MAX_RECHAZOS = 5        # Tras este número, limpiar búfer para re-adaptar
 
-# --- Gestión de memoria para CSV ---
-data_log = []
-MAX_LOGS = 1200
+# --- Gestión de memoria para CSV (ring buffer en array, sin fragmentar heap) ---
+MAX_LOGS   = 300
+_LOG_N     = 8
+_log_buf   = array.array('f', [0.0] * (MAX_LOGS * _LOG_N))
+_log_idx   = 0
+_log_count = 0
 
 # --- Funciones de pertenencia ---
 def trapmf(x, a, b, c, d):
@@ -151,11 +155,19 @@ error_ant = 0.0
 deriv_f = 0.0
 integral = 0.0
 fan.duty(int(ELEVACION_PWM))
-print("Elevación inicial al máximo PWM...")
-time.sleep(ELEVACION_SEGUNDOS)
-pwm_actual = 400.0
+print("Elevacion inicial al maximo PWM (3 s)...")
+time.sleep(3.0)
+print("Bajando suavemente hacia zona de control...")
+_pwm_ramp_fin = float(PWM_MIN + (PWM_MAX - PWM_MIN) * 0.45)
+_pasos_ramp   = 60   # 60 x 50 ms = 3 s de rampa
+_delta_ramp   = (float(PWM_MAX) - _pwm_ramp_fin) / _pasos_ramp
+for _i in range(_pasos_ramp):
+    pwm_actual = float(PWM_MAX) - _delta_ramp * _i
+    fan.duty(int(pwm_actual))
+    time.sleep_ms(50)
+pwm_actual = _pwm_ramp_fin
 fan.duty(int(pwm_actual))
-time.sleep(0.3)
+print("Rampa completada. Iniciando control...")
 
 # Deltas PWM
 NV_out = -6.0
@@ -271,10 +283,18 @@ try:
         fan.duty(int(pwm_actual))
 
         # Logging protegido
-        data_log.append((tiempo_actual, dist, setpoint, error, deriv_f, integral, delta_pwm, pwm_actual))
-
-        if len(data_log) > MAX_LOGS:
-            data_log.pop(0)
+        _base = _log_idx * _LOG_N
+        _log_buf[_base]   = tiempo_actual
+        _log_buf[_base+1] = dist
+        _log_buf[_base+2] = setpoint
+        _log_buf[_base+3] = error
+        _log_buf[_base+4] = deriv_f
+        _log_buf[_base+5] = integral
+        _log_buf[_base+6] = delta_pwm
+        _log_buf[_base+7] = pwm_actual
+        _log_idx = (_log_idx + 1) % MAX_LOGS
+        if _log_count < MAX_LOGS:
+            _log_count += 1
 
         ciclos += 1
         if ciclos % 100 == 0:
@@ -294,14 +314,17 @@ except KeyboardInterrupt:
     fan.deinit()
     print("\nMotor detenido. Aterrizaje seguro.")
 
-    resp = input("Guardar {} datos en CSV? (s/n): ".format(len(data_log))).strip().lower()
+    resp = input("Guardar {} datos en CSV? (s/n): ".format(_log_count)).strip().lower()
     if resp == 's':
         try:
+            _start = (_log_idx - _log_count) % MAX_LOGS if _log_count == MAX_LOGS else 0
             with open("datos_levitacion.csv", "w") as f:
                 f.write("tiempo,distancia,setpoint,error,derivada,integral,delta_pwm,pwm\n")
-                for d in data_log:
+                for i in range(_log_count):
+                    _b = ((_start + i) % MAX_LOGS) * _LOG_N
                     f.write("{:.3f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f}\n".format(
-                        d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7]))
-            print("Guardado con éxito en el ESP32.")
+                        _log_buf[_b], _log_buf[_b+1], _log_buf[_b+2], _log_buf[_b+3],
+                        _log_buf[_b+4], _log_buf[_b+5], _log_buf[_b+6], _log_buf[_b+7]))
+            print("Guardado con exito en el ESP32.")
         except Exception as e:
             print("Error al guardar:", e)

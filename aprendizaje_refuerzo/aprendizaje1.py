@@ -19,12 +19,21 @@ PWM_MAX = 600
 # Acciones discretas dentro de 200..400
 ACTIONS = [200, 280, 360, 440, 520, 600]
 
-QTABLE_FILE = 'qtable.json'
-SAVE_EVERY  = 100  # guardar cada N pasos
+QTABLE_FILE  = 'qtable.json'
+SAVE_EVERY   = 100   # guardar cada N pasos
+RESET_QTABLE = False # True = borrar tabla y empezar de cero; False = continuar aprendizaje
 
 Q = [[0.0 for _ in range(NUM_ACTIONS)] for _ in range(NUM_STATES)]
 
 def load_qtable():
+    import os
+    if RESET_QTABLE:
+        try:
+            os.remove(QTABLE_FILE)
+        except Exception:
+            pass
+        print("Tabla Q reiniciada desde cero")
+        return
     try:
         with open(QTABLE_FILE, 'r') as f:
             data = ujson.load(f)
@@ -158,9 +167,20 @@ print("Iniciando control Q-learning")
 print("Setpoint fijo:", SETPOINT, "cm")
 print("PWM rango:", PWM_MIN, "a", PWM_MAX)
 
-# Fase inicial para levantar: usar PWM 400
+# Fase inicial: maximo PWM 3 s para subir rapido
+print("Elevacion inicial al maximo PWM (3 s)...")
 fan.duty(PWM_MAX)
-time.sleep(1.2)
+time.sleep(3.0)
+# Rampa suave de bajada: 3 s en 60 pasos de 50 ms
+print("Bajando suavemente hacia zona de control...")
+_pwm_ramp_fin = PWM_MIN + (PWM_MAX - PWM_MIN) * 45 // 100
+_pasos_ramp   = 60
+_delta_ramp   = (PWM_MAX - _pwm_ramp_fin) / _pasos_ramp
+for _i in range(_pasos_ramp):
+    fan.duty(int(PWM_MAX - _delta_ramp * _i))
+    time.sleep_ms(50)
+fan.duty(_pwm_ramp_fin)
+print("Rampa completada. Iniciando Q-learning...")
 
 MAX_STEPS    = 800
 EPSILON_STEP = 0.20   # cuanto sube cada 100 pasos

@@ -1,43 +1,45 @@
 # codigos-IA
 
-Repositorio de control para levitación de pelota con ESP32 usando dos enfoques:
+Repositorio de algoritmos de control inteligente para ESP32: lógica difusa, redes neuronales y aprendizaje por refuerzo aplicados a sistemas embebidos.
 
-- Control difuso (Fuzzy PID)
-- Control con red neuronal
+## Estructura del proyecto
 
-## Archivos principales
+```
+codigos-IA/
+├── logica_difusa/          # Controladores Fuzzy PD + Integral
+├── redes_neuronales/       # Red neuronal entrenada en PC, inferencia en ESP32
+├── aprendizaje_refuerzo/   # Q-Learning y DQN (tres sensores)
+└── graficas-informe-1/     # Gráficas y visualizaciones del informe
+```
 
-### Control difuso
-- `levitacion7niveles.py`: controlador difuso base actualizado.
-- `levitacion_fuzzy_centroide.py`: versión con desfusificación por centroide (singletons).
-- `levitacion_fuzzy_bisector.py`: versión con desfusificación por bisector.
-- `levitacion_fuzzy_mom.py`: versión con desfusificación por Mean of Maximum (MOM).
+## Módulos
 
-### Control red neuronal
-- `levitacion_red_neuronal.py`: controlador de red neuronal base actualizado.
-- `levitacion_red_neuronal_sigmoid.py`: versión con activación oculta sigmoid.
-- `levitacion_red_neuronal_tanh.py`: versión con activación oculta tanh.
-- `levitacion_red_neuronal_relu.py`: versión con activación oculta ReLU.
+### [logica_difusa/](logica_difusa/README.md)
+Controladores fuzzy con tres métodos de defuzzificación para levitación de pelota.
+- `levitacion_fuzzy_centroide.py` — defuzzificación por Centroide
+- `levitacion_fuzzy_bisector.py` — defuzzificación por Bisector
+- `levitacion_fuzzy_mom.py` — defuzzificación por Mean of Maximum
 
-### Entrenamiento y exportación
-- `entrenar_red_levitador.py`: entrena la red neuronal en PC con CSVs de datos reales.
-- `exportar_pesos_esp32.py`: exporta pesos y normalización para pegar en el script de ESP32.
+### [redes_neuronales/](redes_neuronales/README.md)
+Red neuronal FCLayer(3→16→12→8→1) entrenada con datos reales, exportada al ESP32.
+- Tres variantes de activación: ReLU, Sigmoid, Tanh
+- Scripts de entrenamiento y exportación de pesos
+- Datos CSV de captura real del sistema
 
-## Cambios aplicados para el experimento
+### [aprendizaje_refuerzo/](aprendizaje_refuerzo/README.md)
+Q-Learning clásico en ESP32 y DQN para navegación con tres sensores ultrasónicos.
+- `aprendizaje1.py` — Q-Learning directo en ESP32
+- `dqn_tres_sensores.py` — entrenamiento DQN en PC (gymnasium + torch)
+- `dqn_esp32.py` — inferencia DQN en ESP32 (sin dependencias externas)
 
-1. Se crearon **3 versiones diferentes** del algoritmo difuso variando el método de desfusificación.
-2. Se crearon **3 versiones diferentes** del algoritmo de red neuronal variando la función de activación.
-3. Todas las versiones usan **PWM mínimo = 230**.
-4. Todas las versiones incluyen una fase de **elevación inicial al máximo PWM** antes de iniciar el control fino.
-5. Todas las versiones conservan la opción de **guardar datos en CSV** al detener con `Ctrl+C`.
+## Hardware
 
-## Uso en ESP32
+- **Microcontrolador:** ESP32
+- **Sensores:** HC-SR04 (ultrasónico)
+- **Actuador:** Electroimán + driver PWM
 
-1. Copia el archivo de control que quieras probar al ESP32 (como `main.py`).
-2. Ajusta el setpoint cuando se solicite.
-3. Ejecuta el experimento.
-4. Detén con `Ctrl+C` y guarda CSV cuando el sistema lo pregunte.
+## Dependencias PC
 
-## Nota
-
-Para las versiones de red neuronal, primero debes entrenar y exportar pesos desde PC, luego reemplazar los placeholders de pesos en el archivo que vayas a usar en el ESP32.
+```bash
+pip install numpy matplotlib scikit-fuzzy gymnasium torch
+```
