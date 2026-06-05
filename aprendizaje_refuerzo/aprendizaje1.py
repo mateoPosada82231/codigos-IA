@@ -2,6 +2,7 @@ from machine import Pin, PWM
 import time
 import random
 import ujson
+import array
 
 # =========================
 # Parámetros Q-learning
@@ -161,6 +162,33 @@ def reward_fn(dist):
     # Penaliza alejamiento del setpoint
     return -abs(dist - SETPOINT)
 
+# --- Gestión de memoria para CSV (ring buffer en array, sin fragmentar heap) ---
+MAX_LOGS      = 300
+WARMUP_STEPS  = 100   # descartar primeros 100 samples (estabilización inicial)
+_LOG_N        = 8
+_log_buf      = array.array('f', [0.0] * (MAX_LOGS * _LOG_N))
+_log_idx      = 0
+_log_count    = 0
+_warmup_steps = WARMUP_STEPS
+_LOG_FILENAME = "datos_qlearning.csv"
+
+def save_csv():
+    resp = input("Guardar {} datos en CSV? (s/n): ".format(_log_count)).strip().lower()
+    if resp != 's':
+        return
+    try:
+        _start = (_log_idx - _log_count) % MAX_LOGS if _log_count == MAX_LOGS else 0
+        with open(_LOG_FILENAME, "w") as f:
+            f.write("tiempo,distancia,setpoint,error,pwm,accion,recompensa,epsilon\n")
+            for i in range(_log_count):
+                _b = ((_start + i) % MAX_LOGS) * _LOG_N
+                f.write("{:.3f},{:.2f},{:.2f},{:.2f},{},{:.0f},{:.2f},{:.2f}\n".format(
+                    _log_buf[_b], _log_buf[_b+1], _log_buf[_b+2], _log_buf[_b+3],
+                    int(_log_buf[_b+4]), _log_buf[_b+5], _log_buf[_b+6], _log_buf[_b+7]))
+        print("Guardado con exito en el ESP32:", _LOG_FILENAME)
+    except Exception as e:
+        print("Error al guardar:", e)
+
 load_qtable()
 
 print("Iniciando control Q-learning")
@@ -186,6 +214,7 @@ MAX_STEPS    = 800
 EPSILON_STEP = 0.20   # cuanto sube cada 100 pasos
 
 step = 0
+t_inicio = time.ticks_ms()
 try:
     while True:
         # Estado actual
@@ -213,6 +242,25 @@ try:
 
         step += 1
 
+        # CSV logging (omitido durante el warmup inicial)
+        if _warmup_steps > 0:
+            _warmup_steps -= 1
+        else:
+            tiempo_actual = time.ticks_diff(time.ticks_ms(), t_inicio) / 1000.0
+            error = dist_now - SETPOINT
+            _base = _log_idx * _LOG_N
+            _log_buf[_base]   = tiempo_actual
+            _log_buf[_base+1] = dist_now
+            _log_buf[_base+2] = SETPOINT
+            _log_buf[_base+3] = error
+            _log_buf[_base+4] = float(pwm_cmd)
+            _log_buf[_base+5] = float(a)
+            _log_buf[_base+6] = r
+            _log_buf[_base+7] = EPSILON
+            _log_idx = (_log_idx + 1) % MAX_LOGS
+            if _log_count < MAX_LOGS:
+                _log_count += 1
+
         # Aumentar epsilon cada 100 pasos (tope 1.0)
         if step % 100 == 0:
             EPSILON = min(1.0, EPSILON + EPSILON_STEP)
@@ -231,3 +279,11 @@ except KeyboardInterrupt:
     fan.duty(0)
     save_qtable()
     print("Detenido. Tabla Q guardada en '{}'.".format(QTABLE_FILE))
+    save_csv()
+
+# Guardar también al final normal (sin KeyboardInterrupt)
+if step >= MAX_STEPS:
+    fan.duty(0)
+    save_qtable()
+    print("Sesión finalizada. Tabla Q guardada en '{}'.".format(QTABLE_FILE))
+    save_csv()

@@ -44,11 +44,14 @@ rechazos = 0           # Contador de lecturas rechazadas consecutivas
 MAX_RECHAZOS = 5        # Tras este número, limpiar búfer para re-adaptar
 
 # --- Gestión de memoria para CSV (ring buffer en array, sin fragmentar heap) ---
-MAX_LOGS   = 300
-_LOG_N     = 8
-_log_buf   = array.array('f', [0.0] * (MAX_LOGS * _LOG_N))
-_log_idx   = 0
-_log_count = 0
+MAX_LOGS      = 300
+WARMUP_STEPS  = 100   # descartar primeros 100 samples (estabilización inicial)
+_LOG_N        = 8
+_log_buf      = array.array('f', [0.0] * (MAX_LOGS * _LOG_N))
+_log_idx      = 0
+_log_count    = 0
+_warmup_steps = WARMUP_STEPS
+_LOG_FILENAME = "datos_fuzzy_bisector.csv"
 
 # --- Funciones de pertenencia ---
 def trapmf(x, a, b, c, d):
@@ -282,19 +285,22 @@ try:
             pwm_actual = float(PWM_MIN)
         fan.duty(int(pwm_actual))
 
-        # Logging protegido
-        _base = _log_idx * _LOG_N
-        _log_buf[_base]   = tiempo_actual
-        _log_buf[_base+1] = dist
-        _log_buf[_base+2] = setpoint
-        _log_buf[_base+3] = error
-        _log_buf[_base+4] = deriv_f
-        _log_buf[_base+5] = integral
-        _log_buf[_base+6] = delta_pwm
-        _log_buf[_base+7] = pwm_actual
-        _log_idx = (_log_idx + 1) % MAX_LOGS
-        if _log_count < MAX_LOGS:
-            _log_count += 1
+        # Logging protegido (omitido durante el warmup inicial)
+        if _warmup_steps > 0:
+            _warmup_steps -= 1
+        else:
+            _base = _log_idx * _LOG_N
+            _log_buf[_base]   = tiempo_actual
+            _log_buf[_base+1] = dist
+            _log_buf[_base+2] = setpoint
+            _log_buf[_base+3] = error
+            _log_buf[_base+4] = deriv_f
+            _log_buf[_base+5] = integral
+            _log_buf[_base+6] = delta_pwm
+            _log_buf[_base+7] = pwm_actual
+            _log_idx = (_log_idx + 1) % MAX_LOGS
+            if _log_count < MAX_LOGS:
+                _log_count += 1
 
         ciclos += 1
         if ciclos % 100 == 0:
@@ -318,7 +324,7 @@ except KeyboardInterrupt:
     if resp == 's':
         try:
             _start = (_log_idx - _log_count) % MAX_LOGS if _log_count == MAX_LOGS else 0
-            with open("datos_levitacion.csv", "w") as f:
+            with open(_LOG_FILENAME, "w") as f:
                 f.write("tiempo,distancia,setpoint,error,derivada,integral,delta_pwm,pwm\n")
                 for i in range(_log_count):
                     _b = ((_start + i) % MAX_LOGS) * _LOG_N

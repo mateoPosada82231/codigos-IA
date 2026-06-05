@@ -16,6 +16,7 @@ acciones PWM [200, 280, 360, 440, 520, 600].
 """
 import time
 import machine
+import array
 import pesos_dqn_levitador as P
 
 
@@ -25,6 +26,9 @@ import pesos_dqn_levitador as P
 POS_NORM = P.POS_NORM
 VEL_NORM = P.VEL_NORM
 PWM_ACTIONS = P.PWM_ACTIONS
+
+# Setpoint del levitador (referencia para columna "error" en el CSV)
+SETPOINT = 15.0
 
 # ============================================================
 # Pines (mismo cableado que el resto del proyecto)
@@ -151,6 +155,37 @@ def forward(pos_cm, vel_cm_s):
 
 
 # ============================================================
+# CSV logging (ring buffer + warmup, sin fragmentar heap)
+# ============================================================
+MAX_LOGS      = 300
+WARMUP_STEPS  = 100   # descartar primeros 100 samples (estabilización inicial)
+_LOG_N        = 8
+_log_buf      = array.array('f', [0.0] * (MAX_LOGS * _LOG_N))
+_log_idx      = 0
+_log_count    = 0
+_warmup_steps = WARMUP_STEPS
+_LOG_FILENAME = "datos_dqn.csv"
+
+
+def save_csv():
+    resp = input("Guardar {} datos en CSV? (s/n): ".format(_log_count)).strip().lower()
+    if resp != 's':
+        return
+    try:
+        _start = (_log_idx - _log_count) % MAX_LOGS if _log_count == MAX_LOGS else 0
+        with open(_LOG_FILENAME, "w") as f:
+            f.write("tiempo,distancia,velocidad,setpoint,error,pwm,accion,q_max\n")
+            for i in range(_log_count):
+                _b = ((_start + i) % MAX_LOGS) * _LOG_N
+                f.write("{:.3f},{:.2f},{:.2f},{:.2f},{:.2f},{},{:.0f},{:.2f}\n".format(
+                    _log_buf[_b], _log_buf[_b+1], _log_buf[_b+2], _log_buf[_b+3],
+                    _log_buf[_b+4], int(_log_buf[_b+5]), _log_buf[_b+6], _log_buf[_b+7]))
+        print("Guardado con exito en el ESP32:", _LOG_FILENAME)
+    except Exception as e:
+        print("Error al guardar:", e)
+
+
+# ============================================================
 # Bucle principal (lazo a 20 Hz)
 # ============================================================
 PERIODO_MS = 50
@@ -165,15 +200,41 @@ time.sleep_ms(TIEMPO_ELEVACION_MS)
 
 print("Inferencia DQN activa. Setpoint 15 cm.")
 t0 = time.ticks_ms()
-while True:
-    pos, vel = leer_distancia()
-    q = forward(pos, vel)
-    a = _argmax(q)
-    pwm_cmd = PWM_ACTIONS[a]
-    fan.duty(pwm_cmd)
+try:
+    while True:
+        pos, vel = leer_distancia()
+        q = forward(pos, vel)
+        a = _argmax(q)
+        q_max = q[a]
+        pwm_cmd = PWM_ACTIONS[a]
+        fan.duty(pwm_cmd)
 
-    t = time.ticks_diff(time.ticks_ms(), t0)
-    print("[{:6d}ms] pos={:5.2f}cm vel={:6.1f}cm/s | Q=[{:5.1f},{:5.1f},{:5.1f},{:5.1f},{:5.1f},{:5.1f}] | PWM={}".format(
-        t, pos, vel, q[0], q[1], q[2], q[3], q[4], q[5], pwm_cmd))
+        # CSV logging (omitido durante el warmup inicial)
+        if _warmup_steps > 0:
+            _warmup_steps -= 1
+        else:
+            t = time.ticks_diff(time.ticks_ms(), t0)
+            error = pos - SETPOINT
+            _base = _log_idx * _LOG_N
+            _log_buf[_base]   = t / 1000.0
+            _log_buf[_base+1] = pos
+            _log_buf[_base+2] = vel
+            _log_buf[_base+3] = SETPOINT
+            _log_buf[_base+4] = error
+            _log_buf[_base+5] = float(pwm_cmd)
+            _log_buf[_base+6] = float(a)
+            _log_buf[_base+7] = q_max
+            _log_idx = (_log_idx + 1) % MAX_LOGS
+            if _log_count < MAX_LOGS:
+                _log_count += 1
 
-    time.sleep_ms(PERIODO_MS)
+        print("[{:6d}ms] pos={:5.2f}cm vel={:6.1f}cm/s | Q=[{:5.1f},{:5.1f},{:5.1f},{:5.1f},{:5.1f},{:5.1f}] | PWM={}".format(
+            time.ticks_diff(time.ticks_ms(), t0), pos, vel,
+            q[0], q[1], q[2], q[3], q[4], q[5], pwm_cmd))
+
+        time.sleep_ms(PERIODO_MS)
+
+except KeyboardInterrupt:
+    fan.duty(0)
+    print("\nMotor detenido.")
+    save_csv()
