@@ -103,7 +103,7 @@ Pelota            & Icopor, 0.5\,g              & ---               \\
 % ─────────────────────────────────────────────────────────────────────────────
 \begin{figure}[H]
     \centering
-    % \includegraphics[width=0.9\columnwidth]{montaje-fisico.jpg}
+    \includegraphics[width=0.9\columnwidth]{esquema_montaje.png}
     \caption{Montaje físico completo: tubo de acrílico, ventilador en la base, sensor ultrasónico en la parte superior y ESP32 como unidad de control.}
     \label{fig:montaje}
 \end{figure}
@@ -140,7 +140,7 @@ El proyecto se organiza en tres módulos principales, cada uno correspondiente a
 
 \begin{figure}[H]
     \centering
-    % \includegraphics[width=0.8\columnwidth]{estructura-repo.png}
+    \includegraphics[width=0.9\columnwidth]{estructura_repo.png}
     \caption{Estructura de carpetas del repositorio con los tres módulos principales y sus variantes de configuración.}
     \label{fig:estructura}
 \end{figure}
@@ -231,7 +231,7 @@ Se diseñó una red neuronal completamente conectada con arquitectura FCLayer(3$
 
 \begin{figure}[H]
     \centering
-    % \includegraphics[width=0.9\columnwidth]{arquitectura-rn.png}
+    \includegraphics[width=0.95\columnwidth]{arquitectura_rn.png}
     \caption{Arquitectura de la red neuronal: 3 entradas $\to$ 16 neuronas $\to$ 12 neuronas $\to$ 8 neuronas $\to$ 1 salida. Tres capas ocultas con función de activación configurable y salida lineal.}
     \label{fig:arquitectura-rn}
 \end{figure}
@@ -349,16 +349,7 @@ Librerías              & Solo stdlib         & PC: torch + numpy; ESP32: stdlib
 \section{Resultados}
 \label{sec:results}
 
-\subsection{Comparaci\'on Q-Learning vs DQN en simulador}
 
-El simulador 1D del tubo permite comparar de forma reproducible las dos estrategias de aprendizaje por refuerzo sobre el mismo problema y partiendo de la misma posici\'on inicial aleatoria. La Fig.~\ref{fig:dqn-curvas} muestra la curva de aprendizaje (recompensa por episodio, suavizada con media m\'ovil de 50) y la distribuci\'on de recompensa en los \'ultimos 100 episodios de cada agente. La DQN alcanza asint\'oticamente una recompensa media de $\sim$920 frente a $\sim$330 del Q-Learning tabular, consistente con los valores de la Tabla~\ref{tab:rl-comparacion}.
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=\columnwidth]{aprendizaje_refuerzo/resultados/dqn_levitador.png}
-    \caption{Curva de aprendizaje y distribuci\'on final de la recompensa para el Q-Learning tabular y la DQN sobre el simulador 1D del levitador.}
-    \label{fig:dqn-curvas}
-\end{figure}
 
 % (Resultados de las pruebas en campo f\'isico a documentar despu\'es de las pruebas)
 
