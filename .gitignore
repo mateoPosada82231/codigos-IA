@@ -1,5 +1,70 @@
+# ============================================================
+# Python
+# ============================================================
 __pycache__/
-*.pyc
-pesos_levitador.pkl
-entrenamiento_levitador.png
-comparacion_fuzzy_vs_rn.png
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# ============================================================
+# Entornos virtuales
+# ============================================================
+.venv/
+venv/
+env/
+ENV/
+
+# ============================================================
+# IDE / editores
+# ============================================================
+.idea/
+.vscode/
+*.code-workspace
+*.swp
+*.swo
+*~
+
+# ============================================================
+# Archivos del sistema operativo
+# ============================================================
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ============================================================
+# Artefactos de ML (regenerables corriendo los scripts)
+# ============================================================
+# Pesos PyTorch
+*.pth
+*.pt
+# Tablas Q y otros arrays NumPy
+*.npy
+*.npz
+# Pickles de sklearn / joblib
+*.pkl
+*.joblib
+
+# ============================================================
+# LaTeX (auxiliares y PDF compilado)
+# ============================================================
+*.aux
+*.log
+*.out
+*.toc
+*.bbl
+*.blg
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.dvi
+*.pdf
+!informe.pdf
+
+# ============================================================
+# Logs y datos crudos
+# ============================================================
+*.log
+*.tmp
+*.bak

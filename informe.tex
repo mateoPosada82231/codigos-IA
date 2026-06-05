@@ -14,6 +14,7 @@
 \usepackage{xcolor}
 \usepackage{caption}
 \usepackage{url}
+\usepackage{tabularx}
 
 \definecolor{codegray}{rgb}{0.95,0.95,0.95}
 \definecolor{codegreen}{rgb}{0,0.45,0}
@@ -41,7 +42,7 @@
 % ─────────────────────────────────────────────────────────────────────────────
 \begin{document}
 
-\title{Controlador Difuso PD+Integral para Levitación de Pelota\\
+\title{Sistemas de Control Inteligente para Levitación\\
 en un Tubo de Acrílico Usando un Microcontrolador ESP32}
 
 \author{
@@ -57,32 +58,26 @@ en un Tubo de Acrílico Usando un Microcontrolador ESP32}
 
 % ─────────────────────────────────────────────────────────────────────────────
 \begin{abstract}
-Este artículo presenta el diseño y la validación experimental de un controlador difuso tipo PD con término integral para estabilizar una pelota liviana dentro de un tubo de acrílico vertical. El sistema utiliza un sensor ultrasónico HC-SR04 como realimentación de posición y un ventilador DC controlado por modulación de ancho de pulso (PWM) como actuador. El controlador fue implementado en un microcontrolador ESP32 programado en MicroPython operando a 20\,Hz. Una matriz de memoria asociativa difusa (FAM) de 9$\times$7 mapea nueve niveles de error y siete niveles de derivada del error hacia ajustes incrementales de PWM. El componente integral con anti-windup elimina el error en estado estacionario. Los resultados experimentales en tres puntos de consigna (10\,cm, 15\,cm y 20\,cm) demuestran levitación estable con bajo error residual y respuesta transitoria suavizada.
+Este artículo presenta el diseño e implementación de tres estrategias de control inteligente para estabilizar una pelota liviana dentro de un tubo de acrílico vertical. El sistema, basado en un microcontrolador ESP32 programado en MicroPython, utiliza un sensor ultrasónico HC-SR04 como realimentación de posición y un ventilador DC controlado por PWM como actuador. Se implementaron: (i) un controlador difuso PD+I con matriz FAM de $9\times7$ y tres métodos de defuzzificación; (ii) una red neuronal feedforward FCLayer(3$\to$16$\to$12$\to$8$\to$1) entrenada en PC y desplegada en el ESP32, comparando las funciones de activación sigmoide, tanh y ReLU; y (iii) dos estrategias de aprendizaje por refuerzo para el mismo problema de levitación: un Q-Learning tabular de $11\times6$ ejecutado íntegramente en el ESP32, y una Deep Q-Network (DQN) con arquitectura 2$\to$24$\to$24$\to$6, entrenada en PC sobre un simulador 1D del tubo e inferida en el ESP32 a 20\,Hz, que incorpora la velocidad estimada como entrada y mejora la política del baseline tabular. Adicionalmente se incluye un ejemplo académico de DQN con tres sensores que ilustra la flexibilidad del marco. El artículo describe el proyecto, los algoritmos y las variaciones de configuración de cada técnica.
 \end{abstract}
 
 \begin{IEEEkeywords}
-control difuso, levitación de pelota, PWM, ESP32, MicroPython, matriz FAM, controlador PD+I
+control difuso, redes neuronales, aprendizaje por refuerzo, Q-Learning, DQN, levitación, PWM, ESP32, MicroPython, matriz FAM
 \end{IEEEkeywords}
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Introducción}
+\label{sec:intro}
 
-La levitación de una pelota en un tubo vertical es un problema de referencia en sistemas de control no lineales. La inestabilidad inherente de la planta, sumada a las no linealidades aerodinámicas y al ruido de medición proveniente de sensores ultrasónicos de bajo costo, dificulta la sintonización de un controlador PID clásico sin disponer de un modelo matemático preciso del sistema.
+La levitación de una pelota en un tubo vertical es un problema de referencia en sistemas de control no lineales. La inestabilidad inherente de la planta, sumada a las no linealidades aerodinámicas y al ruido de medición de sensores ultrasónicos de bajo costo, dificulta la sintonización de un controlador clásico sin disponer de un modelo matemático preciso.
 
-El control por lógica difusa (FLC, por sus siglas en inglés) ofrece un marco alternativo que codifica el conocimiento experto mediante reglas lingüísticas, logrando un comportamiento robusto y no lineal sin necesidad de identificar un modelo explícito de la planta \cite{zadeh1965}. Trabajos previos han demostrado la efectividad de los controladores difusos en tareas de regulación de posición, incluyendo levitación magnética \cite{lee1990} y actuadores neumáticos \cite{wang1996}. Sin embargo, las implementaciones sobre plataformas embebidas con recursos limitados como el ESP32 siguen siendo escasas en la literatura.
+El control por lógica difusa (FLC) codifica el conocimiento experto mediante reglas lingüísticas, logrando un comportamiento robusto sin modelo explícito \cite{zadeh1965}. Las redes neuronales artificiales ofrecen la capacidad de aproximar funciones no lineales complejas a partir de datos \cite{rumelhart1986}. El aprendizaje por refuerzo permite que un agente aprenda una política de control mediante interacción con el entorno \cite{sutton1998}.
 
-Este trabajo realiza las siguientes contribuciones:
-\begin{itemize}
-    \item Un diseño completo de controlador difuso PD+I con una matriz FAM de $9 \times 7$ adaptada a la dinámica aerodinámica asimétrica de la levitación por aire.
-    \item Un procesamiento de la señal del sensor que combina un búfer de mediana con rechazo de valores atípicos, validado sobre datos ruidosos del HC-SR04.
-    \item Caracterización experimental del error en estado estacionario, la respuesta de la derivada y la señal de actuación PWM en tres puntos de consigna distintos.
-\end{itemize}
-
-El resto del artículo se organiza de la siguiente manera. La Sección\,\ref{sec:system} describe el sistema físico. La Sección\,\ref{sec:controller} presenta el diseño del controlador difuso. La Sección\,\ref{sec:results} reporta y analiza los resultados experimentales. La Sección\,\ref{sec:conclusion} concluye el artículo. El código fuente completo y los datos registrados se encuentran en el Apéndice.
+Este trabajo implementa y compara las tres estrategias sobre un ESP32, evaluando su desempeño en un banco de pruebas físico de levitación por aire. El código fuente completo está disponible públicamente.
 
 % ─────────────────────────────────────────────────────────────────────────────
-\section{Descripción del Sistema}
-\label{sec:system}
+\section{Descripción General del Proyecto}
+\label{sec:general}
 
 \subsection{Configuración del Hardware}
 
@@ -105,144 +100,273 @@ Pelota            & Icopor, 0.5\,g              & ---               \\
 \end{tabular}
 \end{table}
 
-\subsection{Lazo de Control}
+% ─────────────────────────────────────────────────────────────────────────────
+\begin{figure}[H]
+    \centering
+    % \includegraphics[width=0.9\columnwidth]{montaje-fisico.jpg}
+    \caption{Montaje físico completo: tubo de acrílico, ventilador en la base, sensor ultrasónico en la parte superior y ESP32 como unidad de control.}
+    \label{fig:montaje}
+\end{figure}
 
-El ESP32 ejecuta un lazo de realimentación a una frecuencia objetivo de 20\,Hz ($T_s = 50$\,ms). En cada iteración: (i) se activa el sensor ultrasónico y se lee la duración del eco, (ii) se convierte la duración a una distancia en centímetros, (iii) se evalúa el controlador difuso, y (iv) se actualiza el ciclo de trabajo PWM del ventilador. El tiempo se gestiona con \texttt{time.ticks\_ms()} para compensar el tiempo de cómputo variable.
+% ─────────────────────────────────────────────────────────────────────────────
+\subsection{Lazo de Control Común}
 
+El ESP32 ejecuta un lazo de realimentación a una frecuencia objetivo de 20\,Hz ($T_s = 50$\,ms). En cada iteración: (i) se activa el sensor ultrasónico y se lee la duración del eco, (ii) se convierte la duración a distancia en centímetros, (iii) se evalúa la estrategia de control correspondiente, y (iv) se actualiza el ciclo de trabajo PWM del ventilador. El tiempo se gestiona con \texttt{time.ticks\_ms()} para compensar el tiempo de cómputo variable.
+
+El procesamiento común de la señal en las tres implementaciones incluye:
+\begin{itemize}
+    \item Búfer de mediana deslizante de 7 lecturas.
+    \item Rechazo de valores atípicos con umbral de 5\,cm.
+    \item Filtro EMA ($\alpha=0.40$) sobre la derivada del error.
+    \item Acumulador integral con decaimiento 0.998 y anti-windup.
+\end{itemize}
+
+% ─────────────────────────────────────────────────────────────────────────────
 \subsection{División del Tubo en Zonas}
 
-Para facilitar la interpretación de las reglas difusas, el tubo se divide en zonas espaciales superpuestas que corresponden a los niveles lingüísticos de error utilizados por el controlador. La Fig.\,\ref{fig:tubo} muestra esta división para un punto de consigna de 15\,cm: las zonas coloreadas en rojo indican que la pelota se encuentra considerablemente por encima del setpoint (error negativo) y requieren una reducción de la velocidad del ventilador, mientras que las zonas verdes indican que la pelota está por debajo del setpoint y requieren aceleración.
+Para facilitar la interpretación de las reglas difusas, el tubo se divide en zonas espaciales superpuestas que corresponden a los niveles lingüísticos de error. La Fig.\,\ref{fig:tubo} muestra esta división para un punto de consigna de 15\,cm.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.82\columnwidth]{grafico-tubo.jpg}
-    \caption{Fuzzy Logic Zone Division of the Acrylic Tube. Each colored band corresponds to a linguistic error level. The dashed blue line marks the setpoint at 15\,cm.}
+    \caption{Zonas difusas del tubo de acrílico. Cada banda de color corresponde a un nivel lingüístico de error. La línea punteada azul marca el setpoint en 15\,cm.}
     \label{fig:tubo}
 \end{figure}
 
 % ─────────────────────────────────────────────────────────────────────────────
-\section{Diseño del Controlador Difuso}
-\label{sec:controller}
+\subsection{Estructura del Repositorio}
 
+El proyecto se organiza en tres módulos principales, cada uno correspondiente a una tecnología de control. Cada módulo contiene tres variantes de configuración que se comparan entre sí. La Fig.\,\ref{fig:estructura} presenta la estructura del repositorio.
+
+\begin{figure}[H]
+    \centering
+    % \includegraphics[width=0.8\columnwidth]{estructura-repo.png}
+    \caption{Estructura de carpetas del repositorio con los tres módulos principales y sus variantes de configuración.}
+    \label{fig:estructura}
+\end{figure}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\begin{itemize}
+    \item \texttt{logica\_difusa/} --- Controladores fuzzy PD+I con tres métodos de defuzzificación: \texttt{levitacion\_fuzzy\_centroide.py}, \texttt{levitacion\_fuzzy\_bisector.py} y \texttt{levitacion\_fuzzy\_mom.py}.
+    \item \texttt{redes\_neuronales/} --- Red neuronal FCLayer(3$\to$16$\to$12$\to$8$\to$1) entrenada en PC e inferida en ESP32 con tres funciones de activación: \texttt{levitacion\_red\_neuronal\_sigmoid.py}, \texttt{levitacion\_red\_neuronal\_tanh.py} y \texttt{levitacion\_red\_neuronal\_relu.py}.
+    \item \texttt{aprendizaje\_refuerzo/} --- Q-Learning tabular de $11\times6$ ejecutado en el ESP32 (\texttt{aprendizaje1.py}) y DQN de 2$\to$24$\to$24$\to$6 entrenada en PC sobre un simulador 1D del levitador e inferida en el ESP32 (\texttt{dqn\_levitador.py} + \texttt{dqn\_levitador\_esp32.py} + \texttt{exportar\_pesos\_dqn\_levitador.py}). Como ejemplo académico adicional, se conserva una DQN para navegación con tres sensores (\texttt{dqn\_tres\_sensores.py} + \texttt{dqn\_esp32.py}) que no aplica al levitador.
+\end{itemize}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Control por Lógica Difusa}
+\label{sec:fuzzy}
+
+\subsection{Descripción General}
+
+La lógica difusa implementa un controlador PD+I que toma como entradas el error de posición y la derivada filtrada del error, y produce un incremento de PWM ($\Delta_{pwm}$) sumado a la acción integral. El motor de inferencia se basa en una matriz de memoria asociativa difusa (FAM) de $9 \times 7$ reglas, donde 9 niveles de error se cruzan con 7 niveles de derivada. Los tres archivos del módulo comparten idéntica lógica de sensor, filtrado y actuador, diferenciándose únicamente en el método de defuzzificación empleado para convertir el conjunto difuso de salida en un valor nítido de $\Delta_{pwm}$.
+
+% ─────────────────────────────────────────────────────────────────────────────
 \subsection{Funciones de Pertenencia}
 
-El controlador evalúa dos variables de entrada difusas en cada instante de muestreo: el error de posición y la derivada filtrada del error. Nueve funciones de pertenencia trapezoidales particionan el universo de discurso del error, y siete funciones trapezoidales hacen lo propio para la derivada. El uso de funciones trapezoidales, en lugar de triangulares, proporciona mesetas planas en la parte superior que reducen la sensibilidad al ruido del sensor cerca de los límites de las zonas.
-
-Las Fig.\,\ref{fig:error-mf} y Fig.\,\ref{fig:deriv-mf} muestran los gráficos de las funciones de pertenencia del error y su derivada, respectivamente.
+Nueve funciones trapezoidales particionan el universo de discurso del error, y siete funciones trapezoidales hacen lo propio para la derivada. Los niveles lingüísticos del error son: NV (Negativo Muy grande), NB (Negativo Grande), NM (Negativo Medio), NS (Negativo Pequeño), Z (Cero), PS (Positivo Pequeño), PM (Positivo Medio), PB (Positivo Grande) y PV (Positivo Muy grande). Para la derivada se usan los mismos siete niveles sin los extremos NV y PV del error. El uso de trapezoides, en lugar de triangulares, proporciona mesetas planas en la parte superior que reducen la sensibilidad al ruido del sensor cerca de los límites de las zonas. La Fig.\,\ref{fig:error-mf} muestra las funciones de pertenencia del error y la Fig.\,\ref{fig:deriv-mf} las de la derivada.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=\columnwidth]{error-fuzzy.jpg}
-    \caption{Error Membership Functions (9 Levels). Trapezoidal functions spanning from Negative Very Large (NV) to Positive Very Large (PV).}
+    \caption{Funciones de pertenencia del error (9 niveles trapezoidales, de NV a PV).}
     \label{fig:error-mf}
 \end{figure}
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=\columnwidth]{error-derivate-fuzzy.jpg}
-    \caption{Error Derivative Membership Functions (7 Levels). Trapezoidal functions covering the filtered derivative of the position error.}
+    \caption{Funciones de pertenencia de la derivada del error (7 niveles trapezoidales).}
     \label{fig:deriv-mf}
 \end{figure}
 
+% ─────────────────────────────────────────────────────────────────────────────
 \subsection{Matriz de Reglas FAM}
 
-El motor de inferencia utiliza una matriz de memoria asociativa difusa de $9 \times 7$ cuyos valores son incrementos de PWM nítidos ($\Delta_{fuzzy}$). La matriz es intencionalmente asimétrica: aplica incrementos positivos más grandes cuando la pelota cae por debajo del setpoint que los decrementos negativos aplicados cuando sube por encima, reflejando la dinámica descendente más rápida debida a la gravedad. La Fig.\,\ref{fig:fam} muestra la FAM como un mapa de calor codificado por colores.
+La inferencia utiliza una matriz FAM cuyos valores son incrementos de PWM nítidos ($\Delta_{fuzzy}$): NV$=-6$, NB$=-3$, NM$=-1.5$, NS$=-0.5$, Z$=0$, PS$=0.8$, PM$=2.5$, PB$=6$, PV$=18$. La matriz es intencionalmente asimétrica: aplica incrementos positivos más grandes cuando la pelota cae por debajo del setpoint que los decrementos negativos cuando sube, reflejando la dinámica descendente más rápida debida a la gravedad. La Fig.\,\ref{fig:fam} muestra la FAM como mapa de calor.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=\columnwidth]{fuzzy-rules.jpg}
-    \caption{Fuzzy Rule Matrix (FAM Heatmap). Rows correspond to error levels (NV–PV) and columns to derivative levels (NV–PV). Warm colors denote negative PWM increments (braking); cool colors denote positive increments (acceleration).}
+    \caption{Matriz de reglas difusas FAM (mapa de calor). Las filas corresponden a niveles de error (NV–PV) y las columnas a niveles de derivada. Los colores cálidos indican incrementos negativos de PWM (frenado) y los fríos incrementos positivos (aceleración).}
     \label{fig:fam}
 \end{figure}
 
+% ─────────────────────────────────────────────────────────────────────────────
 \subsection{Término Integral y Anti-Windup}
 
-Un término integral proporcional con ganancia $K_I = 0.10$ se suma a la salida del bloque difuso PD para eliminar el error en estado estacionario. El acumulador utiliza un factor de decaimiento exponencial de 0.998 para evitar un crecimiento no acotado, y la integración se desactiva cuando el error absoluto supera los 10\,cm para evitar windup durante transitorios de gran amplitud. La señal PWM final se satura al rango $[170,\, 900]$.
-
-\subsection{Acondicionamiento del Sensor}
-
-Las lecturas crudas del HC-SR04 se filtran mediante dos etapas:
-\begin{enumerate}
-    \item \textbf{Búfer de mediana:} Una ventana deslizante de siete lecturas conserva la mediana, suprimiendo picos aislados.
-    \item \textbf{Compuerta de valores atípicos:} Las lecturas que se desvíen más de 5\,cm de la mediana actual son descartadas. Tras cinco rechazos consecutivos, el búfer se reinicia para permitir la re-adaptación ante cambios escalón.
-\end{enumerate}
+Un término integral con ganancia $K_I = 0.10$ se suma a la salida difusa PD para eliminar el error en estado estacionario. El acumulador utiliza un factor de decaimiento exponencial de 0.998 para evitar un crecimiento no acotado, y la integración se desactiva cuando $|error| > 10$\,cm para evitar windup durante transitorios de gran amplitud. La señal PWM final se satura al rango $[170,\, 900]$.
 
 % ─────────────────────────────────────────────────────────────────────────────
-\section{Resultados Experimentales y Análisis}
-\label{sec:results}
+\subsection{Variaciones: Métodos de Defuzzificación}
 
-Se realizaron tres experimentos con puntos de consigna de 10\,cm, 15\,cm y 20\,cm. Cada experimento tuvo una duración aproximada de 60\,segundos a 20\,Hz, generando hasta 1\,200 muestras por conjunto de datos. Las variables registradas incluyen: tiempo, distancia medida, error de posición, derivada filtrada del error, acumulador integral, incremento de PWM y comando total de PWM.
-
-\subsection{Error de Posición}
-
-La Fig.\,\ref{fig:error} muestra la evolución temporal del error de posición para los tres puntos de consigna.
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=\columnwidth]{error.jpg}
-    \caption{Control Position Error Over Time. The three setpoints converge to near-zero steady-state error within the first few seconds. Residual oscillations remain within $\pm$1\,cm.}
-    \label{fig:error}
-\end{figure}
-
-Los tres puntos de consigna alcanzan el estado estacionario dentro de los primeros 5 a 8\,segundos. El setpoint de 20\,cm exhibe un sobreimpulso inicial ligeramente mayor, lo cual es coherente con la mayor fuerza de sustentación requerida a posiciones más altas y la correspondiente acumulación más intensa del integrador durante el transitorio. En estado estacionario, el error para los tres casos se mantiene acotado dentro de aproximadamente $\pm 0.5$\,cm, valor que se encuentra dentro de la resolución de medición del sensor HC-SR04.
-
-El diseño asimétrico de la FAM resulta efectivo: cuando la pelota cae por debajo del setpoint (error positivo), el controlador aplica una fuerte fuerza correctiva ascendente, mientras que cuando la pelota supera el setpoint (error negativo), reduce la velocidad del ventilador de forma más gradual para permitir un descenso controlado sin subimpulso.
-
-\subsection{Derivada del Error}
-
-La Fig.\,\ref{fig:deriv} muestra la derivada filtrada del error de posición.
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=\columnwidth]{error-derivate.jpg}
-    \caption{Filtered Error Derivative Over Time. The EMA filter ($\alpha = 0.40$) attenuates high-frequency measurement noise while preserving the trend information needed for the derivative action.}
-    \label{fig:deriv}
-\end{figure}
-
-La señal de la derivada es más activa durante el transitorio inicial, proporcionando amortiguamiento anticipatorio que evita que el sobreimpulso se vuelva oscilatorio. Una vez alcanzado el estado estacionario, el componente derivativo se estabiliza cerca de cero, lo que indica que la velocidad de la pelota es despreciable y que la acción proporcional-integral por sí sola mantiene la posición deseada. El filtro EMA con $\alpha = 0.40$ ofrece un buen equilibrio entre rechazo de ruido y retardo de fase: un valor de $\alpha$ menor suavizaría en exceso la señal y retrasaría la respuesta derivativa, mientras que un valor mayor amplificaría el ruido del sensor.
-
-\subsection{Señal de Actuación PWM}
-
-La Fig.\,\ref{fig:pwm} muestra el ciclo de trabajo PWM aplicado al ventilador para cada punto de consigna.
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=\columnwidth]{pwm-used.jpg}
-    \caption{PWM Signal Applied to the Fan Across the Three Setpoints. Higher setpoints require a larger steady-state PWM value to sustain the ball at greater heights against gravity.}
-    \label{fig:pwm}
-\end{figure}
-
-Existe una relación monótona clara entre la altura del setpoint y el nivel de PWM en estado estacionario, lo cual es físicamente esperable: mantener la pelota a mayor altura requiere un flujo de aire mayor para contrarrestar la gravedad a lo largo de un tubo más extenso. El setpoint de 10\,cm se estabiliza alrededor de PWM\,$\approx$\,350, el de 15\,cm alrededor de PWM\,$\approx$\,480 y el de 20\,cm alrededor de PWM\,$\approx$\,600. Los transitorios iniciales del PWM son bruscos pero permanecen dentro de los límites de saturación del hardware ($[170,\,900]$), confirmando que la lógica de anti-windup y saturación opera correctamente. La convergencia de la señal PWM hacia un valor constante corrobora la convergencia del error observada en la Fig.\,\ref{fig:error}.
-
-\subsection{Resumen de Métricas de Desempeño}
-
-La Tabla\,\ref{tab:results} resume las métricas clave de desempeño obtenidas a partir de los datos experimentales.
+Los tres archivos del módulo se diferencian únicamente en el método de defuzzificación seleccionado mediante la variable \texttt{DEFUZZ\_METHOD}. La Tabla\,\ref{tab:defuzz} resume las características de cada uno.
 
 \begin{table}[H]
 \centering
-\caption{Resumen de Desempeño en los Tres Puntos de Consigna}
-\label{tab:results}
-\begin{tabular}{lccc}
+\caption{Comparación de los Tres Métodos de Defuzzificación Implementados}
+\label{tab:defuzz}
+\begin{tabularx}{\columnwidth}{lXX}
 \toprule
-\textbf{Métrica} & \textbf{10\,cm} & \textbf{15\,cm} & \textbf{20\,cm} \\
+\textbf{Método} & \textbf{Comportamiento esperado} & \textbf{Archivo} \\
 \midrule
-Tiempo de establecimiento (aprox.) & $\sim$5\,s   & $\sim$6\,s    & $\sim$8\,s    \\
-Error en estado estacionario (aprox.) & $<$0.5\,cm & $<$0.5\,cm   & $<$0.5\,cm   \\
-PWM en estado estacionario (aprox.)   & 350         & 480           & 600           \\
-Derivada pico (aprox.)                & $\pm$8\,cm/s& $\pm$10\,cm/s & $\pm$12\,cm/s \\
+Centroide & Promedio ponderado de todos los singletons activos; salida más suave y continua.   & \texttt{...centroide.py} \\
+Bisector  & Valor que divide el área total de activación en dos mitades; respuesta intermedia. & \texttt{...bisector.py}  \\
+MOM       & Promedio de los singletons con máxima activación; respuesta más agresiva y rápida. & \texttt{...mom.py} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Control por Redes Neuronales}
+\label{sec:nn}
+
+\subsection{Descripción General}
+
+Las redes neuronales aproximan la política de control difusa mediante un modelo entrenado a partir de datos. En lugar de un conjunto de reglas explícitas, la red codifica la relación entrada-salida en sus pesos sinápticos. El módulo consta de dos fases: (i) entrenamiento en PC con un script (\texttt{entrenar\_red\_levitador.py}) que genera datos de referencia barriendo el espacio de entradas mediante el controlador difuso, y (ii) inferencia en el ESP32 con el forward pass manual y los pesos exportados en formato MicroPython.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\subsection{Arquitectura de la Red}
+
+Se diseñó una red neuronal completamente conectada con arquitectura FCLayer(3$\to$16$\to$12$\to$8$\to$1), que recibe tres entradas: el error de posición, la derivada filtrada del error y la integral acumulada. La salida es el incremento de PWM ($\Delta_{pwm}$). La capa de salida utiliza activación lineal, mientras que las tres capas ocultas admiten tres funciones de activación configurables: sigmoide, tanh y ReLU. La Fig.\,\ref{fig:arquitectura-rn} muestra la arquitectura con sus nodos y conexiones.
+
+\begin{figure}[H]
+    \centering
+    % \includegraphics[width=0.9\columnwidth]{arquitectura-rn.png}
+    \caption{Arquitectura de la red neuronal: 3 entradas $\to$ 16 neuronas $\to$ 12 neuronas $\to$ 8 neuronas $\to$ 1 salida. Tres capas ocultas con función de activación configurable y salida lineal.}
+    \label{fig:arquitectura-rn}
+\end{figure}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\subsection{Forward Pass en el ESP32}
+
+El forward pass se implementa manualmente con buffers pre-asignados (arrays de punto flotante \texttt{array.array('f', ...)}) para evitar la fragmentación del heap y garantizar la ejecución dentro del período de muestreo de 50\,ms. La función \texttt{\_dense\_into} multiplica la entrada por la matriz de pesos y suma el sesgo, escribiendo el resultado en un buffer reutilizable. La normalización de entradas y desnormalización de salida se aplican a partir de los parámetros \texttt{X\_MEAN}, \texttt{X\_STD}, \texttt{Y\_MEAN} y \texttt{Y\_STD} exportados desde PC.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\subsection{Variaciones: Funciones de Activación}
+
+Cada función de activación se implementa en un archivo independiente, manteniendo idéntica la lógica de sensor, filtrado EMA, integral con anti-windup y loggeo CSV. La única diferencia entre los tres archivos es la variable \texttt{ACTIVACION\_OCULTA} y los rangos PWM asociados. La Tabla\,\ref{tab:activaciones} resume las características de cada variante.
+
+\begin{table}[H]
+\centering
+\caption{Comparación de las Tres Variantes por Función de Activación}
+\label{tab:activaciones}
+\begin{tabular}{lcl}
+\toprule
+\textbf{Activación} & \textbf{Épocas / LR} & \textbf{Característica} \\
+\midrule
+Sigmoid & 1500 / 0.005 & Acotada [0,1], saturación suave. \\
+Tanh    & 1500 / 0.005 & Acotada [-1,1], centrada en 0. \\
+ReLU    & 2000 / 0.001 & No acotada, eficiente en cómputo. \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 % ─────────────────────────────────────────────────────────────────────────────
+\section{Aprendizaje por Refuerzo}
+\label{sec:rl}
+
+\subsection{Descripción General}
+
+El aprendizaje por refuerzo aborda el problema desde una perspectiva diferente a las dos técnicas anteriores: en lugar de depender de un modelo o de datos etiquetados, un agente aprende una política de control mediante interacción directa con el entorno, recibiendo una señal de recompensa. El módulo implementa dos variantes: (i) Q-Learning tabular clásico, que se ejecuta completamente en el ESP32 con estados y acciones discretos, y (ii) Deep Q-Network (DQN), que entrena en PC con PyTorch y exporta los pesos al ESP32 para inferencia. Cada variante se compara con su propia configuración base, y al final del proyecto las dos se contrastan con el controlador difuso y las redes neuronales.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\subsection{Q-Learning Clásico en ESP32}
+
+El archivo \texttt{aprendizaje1.py} implementa Q-Learning que se ejecuta completamente en el ESP32. El espacio de estados se discretiza en 11 posiciones (10 a 20\,cm) y el espacio de acciones en 6 valores de PWM (200 a 600). El algoritmo utiliza la política $\epsilon$-greedy con decaimiento gradual de $\epsilon$ desde 0.20 hasta 1.0, tasa de aprendizaje $\alpha = 0.10$ y factor de descuento $\gamma = 0.90$.
+
+La función de recompensa es $R = -|dist - setpoint|$, penalizando el alejamiento del punto de consigna (fijado en 15\,cm). La tabla Q se persiste en el sistema de archivos del ESP32 como \texttt{qtable.json}, permitiendo continuar el aprendizaje entre reinicios. El algoritmo ejecuta 800 pasos por sesión, guardando la tabla cada 100 pasos. La medición de distancia combina mediana de 3 muestras con filtro EMA ($\alpha = 0.3$).
+
+% ─────────────────────────────────────────────────────────────────────────────
+\subsection{Deep Q-Network (DQN) para el Levitador}
+
+El archivo \texttt{dqn\_levitador.py} implementa un simulador 1D del tubo (\texttt{LevitadorEnv}) y entrena dos agentes sobre él: (i) un Q-Learning tabular en el mismo espacio $11\times6$ usado por \texttt{aprendizaje1.py}, que sirve como línea base, y (ii) una DQN con estado continuo, que es la que finalmente se exporta al ESP32.
+
+\subsubsection{Simulador 1D del tubo}
+
+El entorno modela la pelota como una partícula 1D cuya altura tiende asintóticamente a una posición de equilibrio $p_{\text{eq}}(\text{PWM})$ con constante de tiempo $\tau = 0.35$\,s. La curva de equilibrio se aproxima como
+\begin{equation}
+p_{\text{eq}}(\text{PWM}) = 25 - 20 \cdot \frac{\text{PWM}-200}{400},
+\end{equation}
+de modo que PWM\,200 empuja la pelota hacia $\sim$25\,cm (baja) y PWM\,600 hacia $\sim$5\,cm (sube). Cada paso añade ruido gaussiano ($\sigma = 0.15$\,cm) para representar la turbulencia. La recompensa es
+\begin{equation}
+r = -0.3\,|e| + \begin{cases} 7 & \text{si } |e| < 0.3\text{\,cm} \\ 3 & \text{si } |e| < 1.0\text{\,cm} \\ 0 & \text{en otro caso,} \end{cases}
+\end{equation}
+donde $e = \text{pos} - 15$ es el error respecto al setpoint. El episodio termina al cruzar los límites físicos del tubo o al cumplirse 150 pasos (7.5\,s).
+
+\subsubsection{Arquitectura de la red}
+
+La DQN recibe el estado normalizado $[p,\,v] \in [0,1]\times[-1,1]$ (posición y velocidad estimadas) y produce los seis $Q$-values de las acciones PWM $[200,\,280,\,360,\,440,\,520,\,600]$. La arquitectura es 2$\to$24$\to$24$\to$6 con activación ReLU en las dos capas ocultas y salida lineal. Tiene un total de $2\!\cdot\!24 + 24\!\cdot\!24 + 24\!\cdot\!6 + 24 + 24 + 6 = 786$ parámetros entrenables ($\sim$3.1\,KB en punto flotante), perfectamente asumible por el ESP32.
+
+\subsubsection{Entrenamiento}
+
+El agente se entrena con los ingredientes clásicos de DQN:
+\begin{itemize}
+    \item \textbf{Replay buffer:} 2000 transiciones $(\mathbf{s},a,r,\mathbf{s}',\text{done})$ muestreadas uniformemente.
+    \item \textbf{Target network:} Copia congelada de la red principal, sincronizada cada 10 episodios.
+    \item \textbf{Exploración:} $\epsilon$-greedy con $\epsilon$ que decae de 1.0 a 0.01 con factor 0.995.
+    \item \textbf{Optimizador:} Adam con tasa de aprendizaje $10^{-3}$.
+    \item \textbf{Pérdida:} MSE sobre la ecuación de Bellman con $\gamma = 0.95$.
+    \item \textbf{Épocas:} 800 episodios de 150 pasos cada uno (120\,000 transiciones efectivas).
+\end{itemize}
+
+\subsubsection{Inferencia en el ESP32}
+
+El script \texttt{dqn\_levitador\_esp32.py} implementa el forward pass manual de la red (producto matriz-vector + ReLU) sobre los mismos 6\,KB de pesos exportados a \texttt{pesos\_dqn\_levitador.py}. El estado se construye a partir de una lectura mediana de 3 muestras del HC-SR04, filtrada con un EMA ($\alpha = 0.40$), y de la velocidad estimada por diferenciación numérica suavizada con un EMA. El lazo corre a 20\,Hz sobre el mismo hardware del proyecto (TRIG 27 / ECHO 26, ventilador en GPIO 14, PWM 25\,kHz).
+
+\subsubsection{Comparación con la tabla Q}
+
+Tras entrenar ambos agentes en el simulador, se evalúan sus políticas greedy sobre 200 episodios nuevos partiendo de posiciones iniciales aleatorias en $[12,\,18]$\,cm. La Tabla~\ref{tab:rl-comparacion} resume los resultados. La DQN reduce el error medio de $\sim$0.9\,cm a $\sim$0.2\,cm y aumenta la fracción de tiempo dentro de $\pm1$\,cm de $\sim$55\,\% a $\sim$99\,\%. La ventaja se atribuye a que la DQN (a) generaliza entre estados vecinos al usar posición continua, (b) incorpora la velocidad y por tanto anticipa la tendencia de la pelota, y (c) puede aproximar la política óptima de PWM, en contraste con el control bang-bang que produce el agente tabular.
+
+\subsubsection{Ejemplo adicional: DQN con tres sensores}
+
+Como complemento académico, se conserva un ejemplo de DQN con tres sensores ultrasónicos (\texttt{dqn\_tres\_sensores.py} + \texttt{dqn\_esp32.py}) que resuelve un problema distinto de navegación con cinco acciones (avanzar, retroceder, girar izquierda, girar derecha, mantener). Este ejemplo no aplica al levitador de un sensor; se incluye únicamente para ilustrar la flexibilidad del marco DQN sobre un espacio de observación de mayor dimensionalidad.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\subsection{Variaciones: Q-Learning vs DQN (en el levitador)}
+
+\begin{table}[H]
+\centering
+\caption{Comparación de las Dos Estrategias de Aprendizaje por Refuerzo sobre el Mismo Problema de Levitación}
+\label{tab:rl-comparacion}
+\begin{tabular}{lll}
+\toprule
+\textbf{Característica} & \textbf{Q-Learning} & \textbf{DQN} \\
+\midrule
+Ejecución              & ESP32 nativo        & Entrenamiento PC, inferencia ESP32 \\
+Representación         & Tabla $11\times6$   & Red 2$\to$24$\to$24$\to$6 ($\sim$3.1\,KB) \\
+Estado                 & Posici\'on discreta & Posici\'on y velocidad continuas \\
+Sensores               & 1 (HC-SR04)         & 1 (HC-SR04) \\
+Acciones               & 6 valores PWM       & 6 valores PWM \\
+Persistencia           & \texttt{qtable.json}& \texttt{pesos\_dqn\_levitador.py} \\
+Error medio (sim)      & $\sim$0.9\,cm       & $\sim$0.2\,cm \\
+$\pm1$\,cm del setpoint& $\sim$55\,\%        & $\sim$99\,\% \\
+Librerías              & Solo stdlib         & PC: torch + numpy; ESP32: stdlib pura \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Resultados}
+\label{sec:results}
+
+\subsection{Comparaci\'on Q-Learning vs DQN en simulador}
+
+El simulador 1D del tubo permite comparar de forma reproducible las dos estrategias de aprendizaje por refuerzo sobre el mismo problema y partiendo de la misma posici\'on inicial aleatoria. La Fig.~\ref{fig:dqn-curvas} muestra la curva de aprendizaje (recompensa por episodio, suavizada con media m\'ovil de 50) y la distribuci\'on de recompensa en los \'ultimos 100 episodios de cada agente. La DQN alcanza asint\'oticamente una recompensa media de $\sim$920 frente a $\sim$330 del Q-Learning tabular, consistente con los valores de la Tabla~\ref{tab:rl-comparacion}.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{aprendizaje_refuerzo/resultados/dqn_levitador.png}
+    \caption{Curva de aprendizaje y distribuci\'on final de la recompensa para el Q-Learning tabular y la DQN sobre el simulador 1D del levitador.}
+    \label{fig:dqn-curvas}
+\end{figure}
+
+% (Resultados de las pruebas en campo f\'isico a documentar despu\'es de las pruebas)
+
+% ─────────────────────────────────────────────────────────────────────────────
 \section{Conclusiones}
 \label{sec:conclusion}
 
-Este artículo ha demostrado el diseño e implementación embebida exitosa de un controlador difuso PD+I para levitación de pelota. La matriz FAM asimétrica de $9 \times 7$ captura el comportamiento aerodinámico no lineal del sistema, mientras que la derivada filtrada con EMA y el término integral con anti-windup garantizan estabilidad y error nulo en estado estacionario. El procesamiento de la señal del sensor (búfer de mediana más compuerta de valores atípicos) resulta esencial para el funcionamiento confiable del HC-SR04 bajo las vibraciones mecánicas generadas por el ventilador.
-
-La validación experimental en tres puntos de consigna confirma que el controlador alcanza levitación estable con tiempos de establecimiento inferiores a 10\,s y errores residuales menores a $\pm 0.5$\,cm en todos los casos. La relación monótona entre la altura del setpoint y el PWM en estado estacionario es físicamente coherente e indica un lazo de control bien calibrado.
-
-Como trabajo futuro se explorará la sintonización automática de los valores de la FAM mediante algoritmos genéticos, tasas de muestreo adaptativas y la extensión a escenarios con múltiples pelotas.
+% (Conclusiones a redactar una vez documentados los resultados)
 
 % ─────────────────────────────────────────────────────────────────────────────
 \begin{thebibliography}{9}
@@ -252,10 +376,20 @@ L.\,A. Zadeh,
 ``Fuzzy sets,''
 \textit{Information and Control}, vol.\,8, no.\,3, pp.\,338--353, 1965.
 
+\bibitem{rumelhart1986}
+D.\,E. Rumelhart, G.\,E. Hinton, and R.\,J. Williams,
+``Learning representations by back-propagating errors,''
+\textit{Nature}, vol.\,323, no.\,6088, pp.\,533--536, 1986.
+
+\bibitem{sutton1998}
+R.\,S. Sutton and A.\,G. Barto,
+\textit{Reinforcement Learning: An Introduction}.
+Cambridge, MA: MIT Press, 1998.
+
 \bibitem{lee1990}
 C.\,C. Lee,
 ``Fuzzy logic in control systems: fuzzy logic controller — Part I,''
-\textit{IEEE Transactions on Systems, Man, and Cybernetics}, vol.\,20, no.\,2, pp.\,404--418, Mar./Apr. 1990.
+\textit{IEEE Transactions on Systems, Man, and Cybernetics}, vol.\,20, no.\,2, pp.\,404--418, 1990.
 
 \bibitem{wang1996}
 L.-X. Wang,
@@ -267,11 +401,6 @@ E.\,H. Mamdani and S. Assilian,
 ``An experiment in linguistic synthesis with a fuzzy logic controller,''
 \textit{International Journal of Man-Machine Studies}, vol.\,7, no.\,1, pp.\,1--13, 1975.
 
-\bibitem{driankov1993}
-D. Driankov, H. Hellendoorn, and M. Reinfrank,
-\textit{An Introduction to Fuzzy Control}.
-Berlin: Springer-Verlag, 1993.
-
 \end{thebibliography}
 
 % ─────────────────────────────────────────────────────────────────────────────
@@ -279,12 +408,11 @@ Berlin: Springer-Verlag, 1993.
 \section{Código Fuente y Datos}
 \label{sec:appendix}
 
-El firmware completo en MicroPython (\texttt{levitacion7niveles.py}) y los tres conjuntos de datos CSV experimentales (\texttt{datos\_levitacion\_10cm.csv}, \texttt{datos\_levitacion\_15cm.csv}, \texttt{datos\_levitacion\_20cm.csv}) están disponibles públicamente en:
+El firmware completo en MicroPython y los conjuntos de datos CSV experimentales están disponibles públicamente en:
 
 \begin{center}
 \url{https://github.com/mateoPosada82231/codigos-IA}
 \end{center}
-
 
 % ─────────────────────────────────────────────────────────────────────────────
 \end{document}
