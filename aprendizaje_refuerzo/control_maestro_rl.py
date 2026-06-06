@@ -1,0 +1,519 @@
+"""
+control_maestro_rl.py
+=====================
+Orquestador interactivo para los algoritmos de Aprendizaje por Refuerzo:
+
+  1. Menú para elegir qué controlador ejecutar en el ESP32:
+       1. Q-learning tabular  (aprendizaje1.py)
+       2. DQN levitador       (dqn_levitador_esp32.py)
+       3. DQN tres sensores   (dqn_esp32.py)
+
+  2. Pide setpoint y parámetros en el PC, sube archivo sin input() al ESP32.
+  3. Abre mini-terminal serie (pyserial): muestra output y envía Ctrl+C.
+  4. Al terminar pregunta si re-entrenar:
+       - Q-learning: recarga qtable.json del ESP32 (no re-entrena en PC).
+       - DQN levitador: re-entrena dqn_levitador.py en PC y exporta pesos.
+       - DQN 3 sensores: re-entrena dqn_levitador.py / exportar en PC.
+  5. Inyecta nuevos pesos y pregunta si ejecutar de nuevo.
+
+Uso:
+    python control_maestro_rl.py
+"""
+
+import os
+import sys
+import re
+import time
+import subprocess
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RUTAS
+# ─────────────────────────────────────────────────────────────────────────────
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+CONTROLADORES = {
+    "qlearning": os.path.join(SCRIPT_DIR, "aprendizaje1.py"),
+    "dqn":       os.path.join(SCRIPT_DIR, "dqn_levitador_esp32.py"),
+}
+
+ENTRENADORES = {
+    "dqn": os.path.join(SCRIPT_DIR, "dqn_levitador.py"),
+}
+
+EXPORTADORES = {
+    "dqn": os.path.join(SCRIPT_DIR, "exportar_pesos_dqn_levitador.py"),
+}
+
+CSV_NOMBRES = {
+    "qlearning": "datos_qlearning.csv",
+    "dqn":       "datos_dqn.csv",
+}
+
+PESOS_ARCHIVOS = {
+    "dqn":  os.path.join(SCRIPT_DIR, "pesos_dqn_levitador.py"),
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DETECCIÓN DE PUERTO COM
+# ─────────────────────────────────────────────────────────────────────────────
+
+_PUERTO_CACHE = [None]
+
+
+def _detectar_puerto():
+    try:
+        from serial.tools import list_ports
+        candidatos = []
+        for p in list_ports.comports():
+            desc = (p.description or "").lower()
+            if any(k in desc for k in ("cp210", "ch340", "ch341", "ftdi", "uart",
+                                        "silabs", "usb serial", "esp")):
+                candidatos.append(p.device)
+        if len(candidatos) == 1:
+            print(f"  Puerto detectado automáticamente: {candidatos[0]}")
+            return candidatos[0]
+        if len(candidatos) > 1:
+            print("  Se encontraron varios puertos compatibles:")
+            for i, p in enumerate(candidatos, 1):
+                print(f"    {i}. {p}")
+            while True:
+                sel = input("  Elige el número del puerto: ").strip()
+                if sel.isdigit() and 1 <= int(sel) <= len(candidatos):
+                    return candidatos[int(sel) - 1]
+                print("  Número inválido.")
+        return None
+    except ImportError:
+        return None
+
+
+def _pedir_puerto():
+    if _PUERTO_CACHE[0]:
+        return _PUERTO_CACHE[0]
+    puerto = _detectar_puerto()
+    if not puerto:
+        print("  No se detectó el puerto automáticamente.")
+        puerto = input("  Introduce el puerto COM manualmente (ej. COM3): ").strip()
+    if puerto:
+        _PUERTO_CACHE[0] = puerto
+    return puerto or None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PREPARAR ARCHIVO SIN input() PARA EL ESP32
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _preparar_archivo(modo: str, setpoint: float) -> str:
+    """
+    Crea copia temporal del controlador con:
+    - setpoint hardcodeado (elimina input() interactivo)
+    - guardado CSV automático (resp = 's')
+    - arranque: 5s a PWM máximo, luego control directo (sin rampa)
+    """
+    archivo_orig = CONTROLADORES[modo]
+    archivo_tmp  = os.path.join(SCRIPT_DIR, f"_tmp_rl_{modo}.py")
+
+    with open(archivo_orig, 'r') as f:
+        lineas = f.readlines()
+
+    salida = []
+    i = 0
+    while i < len(lineas):
+        linea = lineas[i]
+
+        # Reemplazar bloque try/except del setpoint (línea con input y setpoint)
+        if linea.strip() == "try:" and i + 1 < len(lineas) and \
+                "setpoint" in lineas[i+1].lower() and "input(" in lineas[i+1].lower():
+            fin = i + 1
+            while fin < len(lineas) and (
+                "setpoint" in lineas[fin].lower() or
+                lineas[fin].strip().startswith("except") or
+                lineas[fin].strip() == ""
+            ):
+                fin += 1
+            salida.append(f"SETPOINT = {setpoint:.2f}  # fijado desde control_maestro_rl.py\n")
+            i = fin
+            continue
+
+        # Reemplazar asignación directa de SETPOINT si no viene de input
+        if re.match(r'\s*SETPOINT\s*=\s*[\d.]+', linea) and "input" not in linea:
+            salida.append(f"SETPOINT = {setpoint:.2f}  # fijado desde control_maestro_rl.py\n")
+            i += 1
+            continue
+
+        # Guardado automático del CSV (respuesta 's')
+        if "resp" in linea and "input(" in linea and "strip().lower()" in linea:
+            salida.append("    resp = 's'  # guardado automático desde control_maestro_rl.py\n")
+            i += 1
+            continue
+
+        # Reemplazar arranque: quitar rampa, poner 5s a max y control directo
+        if "Elevacion inicial" in linea and "3 s" in linea:
+            salida.append(linea.replace("3 s", "5 s"))
+            i += 1
+            # Reemplazar sleep de 3s por 5s
+            while i < len(lineas):
+                l = lineas[i]
+                if "time.sleep(3.0)" in l or "time.sleep_ms(3000)" in l or "TIEMPO_ELEVACION_MS = 3000" in l:
+                    salida.append(l.replace("3.0", "5.0").replace("3000", "5000"))
+                    i += 1
+                    break
+                salida.append(l)
+                i += 1
+            # Eliminar bloque de rampa hasta "Rampa completada"
+            while i < len(lineas):
+                l = lineas[i]
+                i += 1
+                if "Rampa completada" in l or "Iniciando" in l:
+                    # sustituir por inicio directo de control
+                    salida.append("print('Iniciando control...')\n")
+                    break
+                # saltar líneas de la rampa
+                # (contienen _pwm_ramp, _pasos_ramp, _delta_ramp, fan.duty durante rampa)
+            continue
+
+        salida.append(linea)
+        i += 1
+
+    with open(archivo_tmp, 'w') as f:
+        f.writelines(salida)
+
+    return archivo_tmp
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MINI-TERMINAL SERIE
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _terminal_serie(puerto: str, baud: int = 115200):
+    import serial as _serial
+    print("  Conectado al ESP32. Presiona Ctrl+C para detener.\n")
+    print('─'*60)
+    with _serial.Serial(puerto, baud, timeout=0.05) as ser:
+        try:
+            while True:
+                data = ser.read(256)
+                if data:
+                    print(data.decode('utf-8', errors='replace'), end='', flush=True)
+        except KeyboardInterrupt:
+            ser.write(b'\x03')
+            time.sleep(1.5)
+            ser.timeout = 0.2
+            while True:
+                data = ser.read(256)
+                if not data:
+                    break
+                print(data.decode('utf-8', errors='replace'), end='', flush=True)
+    print('\n' + '─'*60)
+    print("  Controlador detenido.")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EJECUTAR EN ESP32
+# ─────────────────────────────────────────────────────────────────────────────
+
+def ejecutar_en_esp32(modo: str, setpoint: float):
+    print(f"\n{'='*60}")
+    print(f"  Preparando: {os.path.basename(CONTROLADORES[modo])}")
+    print('='*60)
+    print("\n  IMPORTANTE: desconecta el MicroPico vREPL de VS Code antes de continuar.")
+    input("  Presiona Enter cuando el puerto esté libre...")
+
+    puerto = _pedir_puerto()
+    if not puerto:
+        print("[ERROR] No se especificó un puerto COM.")
+        return -1
+
+    archivo_tmp = _preparar_archivo(modo, setpoint)
+
+    print(f"\n  Subiendo controlador (setpoint={setpoint:.1f} cm) → main.py en {puerto}...")
+    cmd_put = ["ampy", "--port", puerto, "put", archivo_tmp, "main.py"]
+    try:
+        res = subprocess.run(cmd_put, check=False, capture_output=True, text=True)
+        if res.returncode != 0:
+            print(f"[ERROR] ampy put falló:\n{res.stderr.strip()}")
+            _PUERTO_CACHE[0] = None
+            os.remove(archivo_tmp)
+            return res.returncode
+        print("  Archivo subido correctamente.")
+    except FileNotFoundError:
+        print("\n[ERROR] 'ampy' no está instalado. Instálalo con:  pip install adafruit-ampy")
+        os.remove(archivo_tmp)
+        return -1
+    finally:
+        try:
+            os.remove(archivo_tmp)
+        except OSError:
+            pass
+
+    # Soft-reset del ESP32
+    try:
+        import serial as _serial
+        print(f"\n  Reiniciando ESP32 en {puerto}...")
+        with _serial.Serial(puerto, 115200, timeout=1) as ser:
+            ser.write(b'\x03\x03')
+            time.sleep(0.3)
+            ser.read_all()
+            ser.write(b'\x04')
+            time.sleep(2.0)
+        print("  ESP32 reiniciado. Iniciando controlador...")
+    except ImportError:
+        print("\n[ERROR] pyserial no instalado. Instálalo con:  pip install pyserial")
+        return -1
+    except Exception as e:
+        print(f"\n[ERROR] No se pudo reiniciar el ESP32: {e}")
+        return -1
+
+    _terminal_serie(puerto)
+    return 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DESCARGAR CSV DEL ESP32
+# ─────────────────────────────────────────────────────────────────────────────
+
+def descargar_csv(modo: str):
+    csv_remoto = CSV_NOMBRES[modo]
+    csv_local  = os.path.join(SCRIPT_DIR, f"datos_esp32_{modo}.csv")
+    puerto = _pedir_puerto()
+    if not puerto:
+        print("[AVISO] No hay puerto COM configurado.")
+        return None
+    print(f"\n  Descargando /{csv_remoto} desde el ESP32...")
+    cmd = ["ampy", "--port", puerto, "get", csv_remoto, csv_local]
+    try:
+        res = subprocess.run(cmd, check=False, capture_output=True, text=True)
+        if res.returncode == 0 and os.path.isfile(csv_local):
+            print(f"  CSV descargado en: {csv_local}")
+            return csv_local
+        else:
+            print(f"  [AVISO] No se pudo descargar el CSV.")
+            if res.stderr.strip():
+                print(f"  Detalle: {res.stderr.strip()}")
+            return None
+    except FileNotFoundError:
+        print("[AVISO] 'ampy' no instalado.")
+        return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DESCARGAR QTABLE DEL ESP32 (Q-learning)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def descargar_qtable():
+    qtable_local = os.path.join(SCRIPT_DIR, "qtable.json")
+    puerto = _pedir_puerto()
+    if not puerto:
+        return None
+    print("\n  Descargando qtable.json desde el ESP32...")
+    cmd = ["ampy", "--port", puerto, "get", "qtable.json", qtable_local]
+    try:
+        res = subprocess.run(cmd, check=False, capture_output=True, text=True)
+        if res.returncode == 0 and os.path.isfile(qtable_local):
+            print(f"  qtable.json descargado en: {qtable_local}")
+            return qtable_local
+        else:
+            print(f"  [AVISO] No se pudo descargar qtable.json.")
+            return None
+    except FileNotFoundError:
+        print("[AVISO] 'ampy' no instalado.")
+        return None
+
+
+def subir_qtable():
+    """Sube qtable.json actualizado al ESP32."""
+    qtable_local = os.path.join(SCRIPT_DIR, "qtable.json")
+    if not os.path.isfile(qtable_local):
+        print("  [AVISO] No hay qtable.json local para subir.")
+        return
+    puerto = _pedir_puerto()
+    if not puerto:
+        return
+    print("\n  Subiendo qtable.json actualizado al ESP32...")
+    cmd = ["ampy", "--port", puerto, "put", qtable_local, "qtable.json"]
+    try:
+        res = subprocess.run(cmd, check=False, capture_output=True, text=True)
+        if res.returncode == 0:
+            print("  qtable.json subida correctamente.")
+        else:
+            print(f"  [AVISO] Error al subir qtable.json: {res.stderr.strip()}")
+    except FileNotFoundError:
+        print("[AVISO] 'ampy' no instalado.")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RE-ENTRENAMIENTO DQN EN PC
+# ─────────────────────────────────────────────────────────────────────────────
+
+def reentrenar_dqn():
+    """
+    Ejecuta dqn_levitador.py en PC (re-entrenamiento) y luego
+    exportar_pesos_dqn_levitador.py para actualizar pesos_dqn_levitador.py.
+    """
+    entrenador = ENTRENADORES["dqn"]
+    exportador = EXPORTADORES["dqn"]
+    pesos_dest = PESOS_ARCHIVOS["dqn"]
+
+    print(f"\n{'='*60}")
+    print("  RE-ENTRENANDO DQN EN PC...")
+    print('='*60)
+
+    # Ejecutar entrenador
+    print(f"\n  Ejecutando {os.path.basename(entrenador)}...")
+    try:
+        subprocess.run([sys.executable, entrenador], check=False, cwd=SCRIPT_DIR)
+    except Exception as e:
+        print(f"[ERROR] No se pudo ejecutar el entrenador: {e}")
+        return False
+
+    # Exportar pesos
+    if os.path.isfile(exportador):
+        print(f"\n  Exportando pesos con {os.path.basename(exportador)}...")
+        try:
+            # Captura la salida y la escribe en pesos_dqn_levitador.py
+            res = subprocess.run(
+                [sys.executable, exportador],
+                check=False, capture_output=True, text=True, cwd=SCRIPT_DIR
+            )
+            if res.stdout.strip():
+                with open(pesos_dest, 'w') as f:
+                    f.write(res.stdout)
+                print(f"  Pesos actualizados en {os.path.basename(pesos_dest)}")
+            else:
+                print(f"  [AVISO] El exportador no produjo salida. Revisa {os.path.basename(exportador)}.")
+                if res.stderr.strip():
+                    print(f"  Stderr: {res.stderr.strip()}")
+        except Exception as e:
+            print(f"[ERROR] No se pudo ejecutar el exportador: {e}")
+            return False
+    else:
+        print(f"  [AVISO] No se encontró {os.path.basename(exportador)}. Pesos no actualizados.")
+
+    return True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FLUJO POR MODO
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _ciclo_qlearning(setpoint: float):
+    """Ciclo completo para Q-learning tabular."""
+    while True:
+        ejecutar_en_esp32("qlearning", setpoint)
+
+        # Descargar CSV
+        if _preguntar_si_no("\n¿Deseas descargar el CSV de datos?"):
+            descargar_csv("qlearning")
+
+        # Para Q-learning, la tabla se aprende en el ESP32 — descargar y re-subir
+        if _preguntar_si_no("\n¿Deseas descargar la tabla Q actualizada del ESP32?"):
+            descargar_qtable()
+
+        if not _preguntar_si_no("\n¿Deseas ejecutar de nuevo?"):
+            if _preguntar_si_no("¿Volver al menú principal?"):
+                break
+            else:
+                return "salir"
+
+        # Si se descargó tabla Q, subirla antes de la próxima ejecución
+        if os.path.isfile(os.path.join(SCRIPT_DIR, "qtable.json")):
+            if _preguntar_si_no("¿Subir la tabla Q descargada al ESP32 antes de ejecutar?"):
+                subir_qtable()
+
+    return "menu"
+
+
+def _ciclo_dqn(setpoint: float):
+    """Ciclo completo para DQN levitador."""
+    while True:
+        ejecutar_en_esp32("dqn", setpoint)
+
+        if _preguntar_si_no("\n¿Deseas descargar el CSV de datos?"):
+            descargar_csv("dqn")
+
+        if not _preguntar_si_no("\n¿Deseas re-entrenar la DQN en el PC?"):
+            if _preguntar_si_no("¿Volver al menú principal?"):
+                break
+            else:
+                return "salir"
+
+        ok = reentrenar_dqn()
+        if not ok:
+            print("  El reentrenamiento falló o fue omitido.")
+
+        if not _preguntar_si_no("\n¿Deseas ejecutar de nuevo con los nuevos pesos?"):
+            if _preguntar_si_no("¿Volver al menú principal?"):
+                break
+            else:
+                return "salir"
+
+    return "menu"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UTILIDADES
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _preguntar_si_no(pregunta: str) -> bool:
+    while True:
+        resp = input(f"{pregunta} [s/n]: ").strip().lower()
+        if resp in ('s', 'si', 'sí', 'yes', 'y'):
+            return True
+        if resp in ('n', 'no'):
+            return False
+        print("  Responde 's' o 'n'.")
+
+
+def _pedir_setpoint(default: float = 15.0) -> float:
+    while True:
+        sp = input(f"  Setpoint (cm, ej. {default}): ").strip()
+        try:
+            return float(sp) if sp else default
+        except ValueError:
+            print("  Valor inválido.")
+
+
+def _mostrar_menu():
+    print("\n" + "═"*60)
+    print("  CONTROL MAESTRO — Aprendizaje por Refuerzo  (Levitador)")
+    print("═"*60)
+    print("  Selecciona el controlador que deseas ejecutar en el ESP32:\n")
+    print("    1. Q-learning tabular    (aprendizaje1.py)")
+    print("    2. DQN levitador         (dqn_levitador_esp32.py)")
+    print("    0. Salir")
+    print("─"*60)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────────────────────────────────────────
+
+def main():
+    print("\n  Bienvenido al Control Maestro — Aprendizaje por Refuerzo")
+    print("  Requisitos: pip install adafruit-ampy pyserial\n")
+
+    while True:
+        _mostrar_menu()
+        opcion = input("  Opción: ").strip()
+
+        if opcion == "0":
+            print("\nSaliendo. ¡Hasta luego!\n")
+            break
+
+        if opcion not in ("1", "2"):
+            print("  Opción inválida.")
+            continue
+
+        setpoint = _pedir_setpoint()
+
+        if opcion == "1":
+            resultado = _ciclo_qlearning(setpoint)
+        else:
+            resultado = _ciclo_dqn(setpoint)
+
+        if resultado == "salir":
+            print("\nSaliendo. ¡Hasta luego!\n")
+            break
+
+
+if __name__ == "__main__":
+    main()

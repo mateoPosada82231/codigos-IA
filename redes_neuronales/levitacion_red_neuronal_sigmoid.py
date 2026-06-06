@@ -30,7 +30,7 @@ fan = PWM(Pin(FAN_PIN), freq=25000, duty=0)
 # Variables de control
 DT_TARGET = 0.02  # Período objetivo (20 Hz)
 PWM_MAX   = 450
-PWM_MIN   = 205
+PWM_MIN   = 235
 ELEVACION_PWM = PWM_MAX
 ELEVACION_SEGUNDOS = 1.8
 ACTIVACION_OCULTA = "sigmoid"
@@ -173,9 +173,9 @@ def _dense_into(inputs, weights, bias, out):
 
 def red_neuronal(error, deriv_f, integral):
     # 1. Normalizar entradas
-    _x[0] = (error    - X_MEAN[0]) / X_STD[0]
-    _x[1] = (deriv_f  - X_MEAN[1]) / X_STD[1]
-    _x[2] = (integral - X_MEAN[2]) / X_STD[2]
+    _x[0] = (error    - X_MEAN[0]) / (X_STD[0] if X_STD[0] != 0.0 else 1e-4)
+    _x[1] = (deriv_f  - X_MEAN[1]) / (X_STD[1] if X_STD[1] != 0.0 else 1e-4)
+    _x[2] = (integral - X_MEAN[2]) / (X_STD[2] if X_STD[2] != 0.0 else 1e-4)
 
     # 2. Capa oculta 1: 3→16
     _dense_into(_x, W1, B1, _h1)
@@ -265,19 +265,10 @@ error_ant  = 0.0
 deriv_f    = 0.0
 integral   = 0.0
 fan.duty(int(ELEVACION_PWM))
-print("Elevacion inicial al maximo PWM (3 s)...")
-time.sleep(3.0)
-print("Bajando suavemente hacia zona de control...")
-_pwm_ramp_fin = float(PWM_MIN + (PWM_MAX - PWM_MIN) * 0.45)
-_pasos_ramp   = 60   # 60 x 50 ms = 3 s de rampa
-_delta_ramp   = (float(PWM_MAX) - _pwm_ramp_fin) / _pasos_ramp
-for _i in range(_pasos_ramp):
-    pwm_actual = float(PWM_MAX) - _delta_ramp * _i
-    fan.duty(int(pwm_actual))
-    time.sleep_ms(50)
-pwm_actual = _pwm_ramp_fin
-fan.duty(int(pwm_actual))
-print("Rampa completada. Iniciando control...")
+print("Elevacion inicial al maximo PWM (5 s)...")
+time.sleep(5.0)
+pwm_actual = float(PWM_MAX)
+print("Iniciando control por error...")
 
 t_inicio   = time.ticks_ms()
 t_anterior = time.ticks_ms()
@@ -358,8 +349,8 @@ try:
         if ciclos % 100 == 0:
             gc.collect()
 
-        print("PWM: {:7.2f} | Distancia: {:6.2f} | Error: {:+7.2f}".format(
-            pwm_actual, dist, error))
+        print("PWM: {:7.2f} | Dist: {:6.2f} | Error: {:+7.2f} | dPWM: {:+7.2f}".format(
+            pwm_actual, dist, error, delta_pwm))
 
         # Compensar tiempo de loop
         transcurrido = time.ticks_diff(time.ticks_ms(), t_ahora) / 1000.0

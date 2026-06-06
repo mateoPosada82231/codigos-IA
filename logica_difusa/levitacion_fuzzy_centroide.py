@@ -20,7 +20,7 @@ fan = PWM(Pin(FAN_PIN), freq=25000, duty=0)
 # Variables de control
 DT_TARGET = 0.05        # Período objetivo (20 Hz)
 PWM_MAX   = 900
-PWM_MIN   = 200
+PWM_MIN   = 237
 ELEVACION_PWM = PWM_MAX
 ELEVACION_SEGUNDOS = 1.8
 DEFUZZ_METHOD = "centroid"
