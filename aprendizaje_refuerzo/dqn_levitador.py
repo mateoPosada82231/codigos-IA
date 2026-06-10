@@ -8,6 +8,7 @@ del agente tabular (mismo espacio de estados 11x6 usado por
 aprendizaje1.py en el ESP32).
 """
 import os
+import csv
 import math
 import random
 from collections import deque
@@ -37,10 +38,10 @@ class LevitadorEnv:
         - velocity: cm/s, positivo = cayendo, negativo = subiendo.
 
     Setpoint por defecto: 15 cm.
-    Accion: indice 0..5 -> PWM [200, 280, 360, 440, 520, 600].
+    Accion: indice 0..5 -> PWM [275, 330, 385, 440, 520, 600].
 
     Dinamica:
-        p_eq = 25 - 20 * (pwm - 200) / 400   (lineal: PWM 200 -> 25 cm,
+        p_eq = 25 - 20 * (pwm - 200) / 400   (lineal: PWM 275 -> 21.25 cm,
                                               PWM 600 ->  5 cm)
         pos += (p_eq - pos) * DT / TAU
         vel  = (pos - pos_prev) / DT
@@ -48,7 +49,7 @@ class LevitadorEnv:
     """
     POS_MIN, POS_MAX = 1.0, 39.0
     SETPOINT = 15.0
-    ACTIONS = np.array([200, 280, 360, 440, 520, 600], dtype=np.float32)
+    ACTIONS = np.array([275, 330, 410, 490, 600, 750], dtype=np.float32)
     DT = 0.05
     TAU = 0.35
     NOISE_STD = 0.15
@@ -187,7 +188,7 @@ class ReplayBuffer:
 def train_dqn(env, episodes=800, gamma=0.95, lr=1e-3,
               eps_start=1.0, eps_end=0.01, eps_decay=0.995,
               batch_size=32, target_update=10, buffer_cap=2000,
-              seed=0, verbose=True):
+              seed=0, verbose=True, fuzzy_seed=None):
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
@@ -199,6 +200,12 @@ def train_dqn(env, episodes=800, gamma=0.95, lr=1e-3,
     opt = optim.Adam(net.parameters(), lr=lr)
     loss_fn = nn.MSELoss()
     buf = ReplayBuffer(buffer_cap)
+
+    # Sembrar replay buffer con transiciones expertas de lógica difusa
+    if fuzzy_seed:
+        for trans in fuzzy_seed:
+            buf.push(*trans)
+        print(f"  Replay buffer sembrado con {len(fuzzy_seed)} transiciones expertas fuzzy.")
 
     eps = eps_start
     rewards = []
@@ -326,6 +333,92 @@ def policy_agreement(Q, net):
 
 
 # ============================================================
+# 6a. Carga de transiciones expertas desde los CSVs de lógica difusa
+# ============================================================
+_FUZZY_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "logica_difusa")
+_FUZZY_CSVS = [
+    os.path.join(_FUZZY_DIR, "datos_esp32_centroide.csv"),
+    os.path.join(_FUZZY_DIR, "datos_esp32_bisector.csv"),
+    os.path.join(_FUZZY_DIR, "datos_esp32_mom.csv"),
+]
+
+
+def _nearest_action_idx(pwm_val):
+    """Índice de la acción PWM más cercana al valor dado."""
+    actions = LevitadorEnv.ACTIONS
+    return int(np.argmin(np.abs(actions - pwm_val)))
+
+
+def load_fuzzy_transitions():
+    """
+    Carga los 3 CSVs de lógica difusa y devuelve una lista de transiciones
+    (s, a, r, s2, done) listas para sembrar un ReplayBuffer.
+
+    Columnas CSV: tiempo, distancia, setpoint, error, derivada, integral,
+                  delta_pwm, pwm
+    - state  = [distancia/POS_NORM, derivada/VEL_NORM]
+    - action = índice de la acción PWM más cercana al 'pwm' actual
+    - reward = -0.3*|error| + 3*(|error|<1) + 4*(|error|<0.3)
+    - s2     = state del siguiente paso (misma sesión)
+    """
+    transitions = []
+    for fcsv in _FUZZY_CSVS:
+        fcsv = os.path.normpath(fcsv)
+        if not os.path.isfile(fcsv):
+            print(f"  [INFO] Fuzzy CSV no encontrado: {os.path.basename(fcsv)}")
+            continue
+        rows = []
+        with open(fcsv, newline='') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    rows.append({
+                        'dist':   float(row['distancia']),
+                        'deriv':  float(row['derivada']),
+                        'error':  float(row['error']),
+                        'pwm':    float(row['pwm']),
+                    })
+                except (KeyError, ValueError):
+                    continue
+        # Construir transiciones de paso consecutivo
+        for i in range(len(rows) - 1):
+            r0, r1 = rows[i], rows[i + 1]
+            s  = normalize_state(np.array([r0['dist'], r0['deriv']], dtype=np.float32))
+            s2 = normalize_state(np.array([r1['dist'], r1['deriv']], dtype=np.float32))
+            a  = _nearest_action_idx(r0['pwm'])
+            e  = abs(r0['error'])
+            rew = -0.3 * e
+            if e < 1.0: rew += 3.0
+            if e < 0.3: rew += 4.0
+            transitions.append((s, a, float(rew), s2, 0.0))
+        print(f"  + {os.path.basename(fcsv)}: {len(rows)-1} transiciones expertas")
+    return transitions
+
+
+def init_qtable_from_fuzzy(Q, bin_centers, n_actions):
+    """
+    Pre-inicializa la Q-table usando los datos reales del hardware.
+    Para cada transición fuzzy, refuerza Q[estado][acción_aplicada] con
+    la recompensa observada (actualización de una pasada, α=1).
+    """
+    transitions = load_fuzzy_transitions()
+    # Acumular recompensas por (estado, acción) y promediar
+    acc   = np.zeros((len(bin_centers), n_actions), dtype=np.float32)
+    count = np.zeros((len(bin_centers), n_actions), dtype=np.int32)
+    for s, a, r, s2, _ in transitions:
+        pos_cm = s[0] * POS_NORM
+        si = int(np.argmin(np.abs(bin_centers - pos_cm)))
+        acc[si, a]   += r
+        count[si, a] += 1
+    # Escribir solo celdas con al menos 1 muestra
+    mask = count > 0
+    Q[mask] = acc[mask] / count[mask]
+    n_filled = int(mask.sum())
+    print(f"  Q-table pre-inicializada: {n_filled}/{Q.size} celdas con datos reales")
+    return Q
+
+
+# ============================================================
 # 6. Plot
 # ============================================================
 def smooth(y, w=50):
@@ -367,7 +460,14 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "resultados"), exist_ok=True)
 
     print("=" * 60)
-    print("0) Test de politica heuristica (validacion del entorno)")
+    print("0) Cargando transiciones expertas de lógica difusa")
+    print("=" * 60)
+    fuzzy_transitions = load_fuzzy_transitions()
+    print(f"  Total transiciones expertas cargadas: {len(fuzzy_transitions)}")
+
+    print()
+    print("=" * 60)
+    print("0b) Test de politica heuristica (validacion del entorno)")
     print("=" * 60)
     env = LevitadorEnv(seed=0)
     h_stats = evaluate_policy(env, heuristic_policy, n_episodes=100)
@@ -377,20 +477,53 @@ if __name__ == "__main__":
 
     print()
     print("=" * 60)
-    print("1) Q-Learning tabular (baseline 11x6)")
+    print("1) Q-Learning tabular (baseline 11x6) — pre-inicializado con fuzzy")
     print("=" * 60)
+    # Estados del Q-learning real del ESP32 (aprendizaje1.py) — rango físico completo
+    QL_STATES = np.array([3, 5, 7, 9, 11, 13, 15, 17, 19, 22, 26], dtype=np.float32)
+    Q_init = np.zeros((11, 6), dtype=np.float32)
+    if fuzzy_transitions:
+        Q_init = init_qtable_from_fuzzy(Q_init, QL_STATES, 6)
     env = LevitadorEnv(seed=42)
     Q, ql_rewards = train_qlearning(env, episodes=1500)
+    # Blend: arrancar con Q pre-inicializado (ya está en Q_init, train_qlearning
+    # parte desde cero internamente — re-entrenamos con warm start)
+    if fuzzy_transitions:
+        Q_warm = Q_init.copy()
+        env2 = LevitadorEnv(seed=42)
+        eps = 0.5
+        alpha, gamma = 0.10, 0.90
+        for ep in range(1500):
+            env2.reset()
+            s = env2.discretize(env2.pos)
+            for _ in range(env2.MAX_STEPS):
+                if np.random.rand() < eps:
+                    a = np.random.randint(6)
+                else:
+                    a = int(np.argmax(Q_warm[s]))
+                _, r, done, _, _ = env2.step(a)
+                s_next = env2.discretize(env2.pos)
+                target = 0.0 if done else float(np.max(Q_warm[s_next]))
+                Q_warm[s, a] += alpha * (r + gamma * target - Q_warm[s, a])
+                s = s_next
+                if done:
+                    break
+            eps = max(0.01, eps * 0.995)
+        Q = Q_warm
+        print("  Q-table entrenada con warm start fuzzy.")
     np.save(os.path.join(os.path.dirname(os.path.abspath(__file__)), "qtable_levitador.npy"), Q)
-    print("Q-table final (filas = estado 10..20 cm, cols = accion 200..600):")
+    print("Q-table final (filas = estado 10..20 cm, cols = accion):")
     print(np.round(Q, 2))
 
     print()
     print("=" * 60)
-    print("2) DQN (2 -> 24 -> 24 -> 6)")
+    print("2) DQN (2 -> 24 -> 24 -> 6) — replay buffer sembrado con datos fuzzy")
     print("=" * 60)
     env = LevitadorEnv(seed=42)
-    net, dqn_rewards, dqn_moving = train_dqn(env, episodes=800)
+    net, dqn_rewards, dqn_moving = train_dqn(
+        env, episodes=800,
+        fuzzy_seed=fuzzy_transitions if fuzzy_transitions else None
+    )
     torch.save(net.state_dict(), os.path.join(os.path.dirname(os.path.abspath(__file__)), "dqn_levitador.pth"))
 
     print()

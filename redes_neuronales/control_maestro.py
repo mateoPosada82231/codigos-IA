@@ -253,35 +253,61 @@ def entrenar(activacion: str, csv_path: str | None = None):
     print('='*60)
 
     # Datos de entrenamiento:
-    # - Entradas (X): distribución real del ESP32 (error/deriv/integral que el sistema realmente experimenta)
-    # - Salidas (Y): calculadas con el algoritmo fuzzy centroide sobre esas entradas reales
-    #
-    # NO se usa el delta_pwm grabado en el CSV como target, porque ese valor
-    # proviene de la red anterior (posiblemente mala) y causaría un ciclo vicioso.
-    # El fuzzy centroide es siempre la referencia correcta.
+    # - Base sintética: barrido del espacio (error, deriv, integral) evaluado con fuzzy centroide.
+    # - Datos reales de lógica difusa: los 3 CSVs grabados en el ESP32 con los 3 métodos fuzzy.
+    #   Sus entradas (error/deriv/integral) son la distribución REAL del hardware; los targets
+    #   se recalculan con fuzzy centroide (nunca se usan los delta_pwm grabados para evitar
+    #   ciclos viciosos si la red anterior era mala).
+    # - CSV opcional del controlador RN actual (pasado como argumento).
 
     X_fuzzy_all, Y_fuzzy_all = _generar_datos_fuzzy()
+    X_parts = [X_fuzzy_all]
+    Y_parts = [Y_fuzzy_all]
+    print(f"Muestras fuzzy sintéticas (base): {len(X_fuzzy_all)}")
 
+    # ── Cargar CSVs de las 3 ejecuciones de lógica difusa ──
+    FUZZY_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "logica_difusa")
+    fuzzy_csvs = [
+        os.path.join(FUZZY_DIR, "datos_esp32_centroide.csv"),
+        os.path.join(FUZZY_DIR, "datos_esp32_bisector.csv"),
+        os.path.join(FUZZY_DIR, "datos_esp32_mom.csv"),
+    ]
+    for fcsv in fuzzy_csvs:
+        if os.path.isfile(fcsv):
+            try:
+                X_fc, _ = _cargar_csv_esp32(fcsv)
+                Y_fc = np.array(
+                    [[_fuzzy_centroide(float(X_fc[i, 0]), float(X_fc[i, 1]), float(X_fc[i, 2]))]
+                     for i in range(len(X_fc))],
+                    dtype='float32'
+                )
+                X_parts.append(X_fc)
+                Y_parts.append(Y_fc)
+                print(f"  + {os.path.basename(fcsv)}: {len(X_fc)} muestras reales del hardware")
+            except ValueError as e:
+                print(f"  [AVISO] {os.path.basename(fcsv)}: {e}")
+        else:
+            print(f"  [INFO] No encontrado: {os.path.basename(fcsv)} (se omite)")
+
+    # ── CSV del controlador RN actual (opcional) ──
     if csv_path and os.path.isfile(csv_path):
         try:
-            X_real, _ = _cargar_csv_esp32(csv_path)  # solo usamos X (entradas reales)
-            # Recalcular targets con fuzzy sobre las entradas reales
+            X_real, _ = _cargar_csv_esp32(csv_path)
             Y_real = np.array(
-                [[_fuzzy_centroide(float(X_real[i,0]), float(X_real[i,1]), float(X_real[i,2]))]
+                [[_fuzzy_centroide(float(X_real[i, 0]), float(X_real[i, 1]), float(X_real[i, 2]))]
                  for i in range(len(X_real))],
                 dtype='float32'
             )
-            print(f"Muestras reales del ESP32 (targets recalculados con fuzzy): {len(X_real)}")
-            print(f"Muestras fuzzy de soporte: {len(X_fuzzy_all)}")
-            X_all = np.concatenate([X_real, X_fuzzy_all], axis=0)
-            Y_all = np.concatenate([Y_real, Y_fuzzy_all], axis=0)
+            X_parts.append(X_real)
+            Y_parts.append(Y_real)
+            print(f"  + CSV red neuronal ({activacion}): {len(X_real)} muestras")
         except ValueError as e:
-            print(f"  [AVISO] {e}  — se entrena solo con datos fuzzy.")
-            X_all, Y_all = X_fuzzy_all, Y_fuzzy_all
+            print(f"  [AVISO] CSV red neuronal: {e}")
     else:
-        print("No se encontró CSV del ESP32. Se entrena con datos fuzzy base.")
-        X_all, Y_all = X_fuzzy_all, Y_fuzzy_all
-        print(f"Muestras fuzzy generadas: {len(X_all)}")
+        print("  CSV de red neuronal no disponible (se omite).")
+
+    X_all = np.concatenate(X_parts, axis=0)
+    Y_all = np.concatenate(Y_parts, axis=0)
 
     print(f"Total muestras de entrenamiento: {len(X_all)}")
 

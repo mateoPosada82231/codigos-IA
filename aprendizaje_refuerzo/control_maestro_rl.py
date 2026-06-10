@@ -102,17 +102,19 @@ def _pedir_puerto():
 # PREPARAR ARCHIVO SIN input() PARA EL ESP32
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _preparar_archivo(modo: str, setpoint: float) -> str:
+def _preparar_archivo(modo: str, setpoint: float,
+                      epsilon: float = None, alpha: float = None) -> str:
     """
     Crea copia temporal del controlador con:
     - setpoint hardcodeado (elimina input() interactivo)
     - guardado CSV automático (resp = 's')
     - arranque: 5s a PWM máximo, luego control directo (sin rampa)
+    - epsilon/alpha opcionales para Q-learning (aprender vs ejecutar)
     """
     archivo_orig = CONTROLADORES[modo]
     archivo_tmp  = os.path.join(SCRIPT_DIR, f"_tmp_rl_{modo}.py")
 
-    with open(archivo_orig, 'r') as f:
+    with open(archivo_orig, 'r', encoding='utf-8') as f:
         lineas = f.readlines()
 
     salida = []
@@ -137,6 +139,24 @@ def _preparar_archivo(modo: str, setpoint: float) -> str:
         # Reemplazar asignación directa de SETPOINT si no viene de input
         if re.match(r'\s*SETPOINT\s*=\s*[\d.]+', linea) and "input" not in linea:
             salida.append(f"SETPOINT = {setpoint:.2f}  # fijado desde control_maestro_rl.py\n")
+            i += 1
+            continue
+
+        # Inyectar EPSILON (solo Q-learning)
+        if epsilon is not None and re.match(r'\s*EPSILON\s*=\s*[\d.]+', linea):
+            salida.append(f"EPSILON = {epsilon:.2f}  # fijado desde control_maestro_rl.py\n")
+            i += 1
+            continue
+
+        # Inyectar ALPHA (solo Q-learning modo ejecución: sin aprendizaje)
+        if alpha is not None and re.match(r'\s*ALPHA\s*=\s*[\d.]+', linea):
+            salida.append(f"ALPHA = {alpha:.4f}  # fijado desde control_maestro_rl.py\n")
+            i += 1
+            continue
+
+        # Congelar epsilon cuando se inyecta explícitamente
+        if epsilon is not None and re.match(r'\s*EPSILON_FIXED\s*=\s*(True|False)', linea):
+            salida.append(f"EPSILON_FIXED = True  # fijado desde control_maestro_rl.py\n")
             i += 1
             continue
 
@@ -174,7 +194,7 @@ def _preparar_archivo(modo: str, setpoint: float) -> str:
         salida.append(linea)
         i += 1
 
-    with open(archivo_tmp, 'w') as f:
+    with open(archivo_tmp, 'w', encoding='utf-8') as f:
         f.writelines(salida)
 
     return archivo_tmp
@@ -211,7 +231,8 @@ def _terminal_serie(puerto: str, baud: int = 115200):
 # EJECUTAR EN ESP32
 # ─────────────────────────────────────────────────────────────────────────────
 
-def ejecutar_en_esp32(modo: str, setpoint: float):
+def ejecutar_en_esp32(modo: str, setpoint: float,
+                      epsilon: float = None, alpha: float = None):
     print(f"\n{'='*60}")
     print(f"  Preparando: {os.path.basename(CONTROLADORES[modo])}")
     print('='*60)
@@ -223,7 +244,26 @@ def ejecutar_en_esp32(modo: str, setpoint: float):
         print("[ERROR] No se especificó un puerto COM.")
         return -1
 
-    archivo_tmp = _preparar_archivo(modo, setpoint)
+    # Para DQN, subir primero los pesos (requerido por import en el ESP32)
+    if modo == "dqn":
+        pesos_local = PESOS_ARCHIVOS["dqn"]
+        if not os.path.isfile(pesos_local):
+            print(f"[ERROR] No se encontró {os.path.basename(pesos_local)}. Ejecuta el exportador primero.")
+            return -1
+        print(f"\n  Subiendo pesos DQN → pesos_dqn_levitador.py en {puerto}...")
+        cmd_pesos = ["ampy", "--port", puerto, "put", pesos_local, "pesos_dqn_levitador.py"]
+        try:
+            res_p = subprocess.run(cmd_pesos, check=False, capture_output=True, text=True)
+            if res_p.returncode != 0:
+                print(f"[ERROR] ampy put (pesos) falló:\n{res_p.stderr.strip()}")
+                _PUERTO_CACHE[0] = None
+                return res_p.returncode
+            print("  Pesos subidos correctamente.")
+        except FileNotFoundError:
+            print("\n[ERROR] 'ampy' no está instalado. Instálalo con:  pip install adafruit-ampy")
+            return -1
+
+    archivo_tmp = _preparar_archivo(modo, setpoint, epsilon=epsilon, alpha=alpha)
 
     print(f"\n  Subiendo controlador (setpoint={setpoint:.1f} cm) → main.py en {puerto}...")
     cmd_put = ["ampy", "--port", puerto, "put", archivo_tmp, "main.py"]
@@ -365,23 +405,18 @@ def reentrenar_dqn():
         print(f"[ERROR] No se pudo ejecutar el entrenador: {e}")
         return False
 
-    # Exportar pesos
+    # Exportar pesos (el exportador escribe directamente en pesos_dqn_levitador.py)
     if os.path.isfile(exportador):
         print(f"\n  Exportando pesos con {os.path.basename(exportador)}...")
         try:
-            # Captura la salida y la escribe en pesos_dqn_levitador.py
             res = subprocess.run(
                 [sys.executable, exportador],
-                check=False, capture_output=True, text=True, cwd=SCRIPT_DIR
+                check=False, cwd=SCRIPT_DIR
             )
-            if res.stdout.strip():
-                with open(pesos_dest, 'w') as f:
-                    f.write(res.stdout)
+            if res.returncode == 0 and os.path.isfile(pesos_dest):
                 print(f"  Pesos actualizados en {os.path.basename(pesos_dest)}")
             else:
-                print(f"  [AVISO] El exportador no produjo salida. Revisa {os.path.basename(exportador)}.")
-                if res.stderr.strip():
-                    print(f"  Stderr: {res.stderr.strip()}")
+                print(f"  [AVISO] El exportador falló (código {res.returncode}). Revisa {os.path.basename(exportador)}.")
         except Exception as e:
             print(f"[ERROR] No se pudo ejecutar el exportador: {e}")
             return False
@@ -398,7 +433,22 @@ def reentrenar_dqn():
 def _ciclo_qlearning(setpoint: float):
     """Ciclo completo para Q-learning tabular."""
     while True:
-        ejecutar_en_esp32("qlearning", setpoint)
+        print("\n  Modo de ejecución Q-learning:")
+        print("    1. Aprender   (ε=0.20 — explora bastante, actualiza tabla Q)")
+        print("    2. Ejecutar   (ε=1.00 — usa siempre la mejor acción conocida, sin aprendizaje)")
+        while True:
+            modo_q = input("  Opción [1/2]: ").strip()
+            if modo_q in ("1", "2"):
+                break
+            print("  Opción inválida.")
+        if modo_q == "1":
+            epsilon_q, alpha_q = 0.20, None   # usa ALPHA definido en el archivo
+            print("  → Modo APRENDIZAJE (ε=0.20, 20% aleatorio)")
+        else:
+            epsilon_q, alpha_q = 0.00, 0.0    # 100% greedy, sin actualizar Q
+            print("  → Modo EJECUCIÓN (ε=0.00, 100% greedy, α=0)")
+
+        ejecutar_en_esp32("qlearning", setpoint, epsilon=epsilon_q, alpha=alpha_q)
 
         # Descargar CSV
         if _preguntar_si_no("\n¿Deseas descargar el CSV de datos?"):

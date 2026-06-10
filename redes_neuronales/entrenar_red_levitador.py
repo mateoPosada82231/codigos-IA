@@ -242,7 +242,51 @@ for e in errores:
 
 X_all = np.array(X_list, dtype='float32')
 Y_all = np.array(Y_list, dtype='float32')
-print(f"Total muestras generadas: {len(X_all)}")
+print(f"Muestras fuzzy sintéticas (base): {len(X_all)}")
+
+# =========================
+# ENRIQUECER CON CSVs REALES DE LÓGICA DIFUSA
+# Las 3 ejecuciones reales del ESP32 aportan la distribución de
+# (error, derivada, integral) que el hardware realmente experimenta.
+# Los targets se recalculan con fuzzy centroide para evitar ciclos
+# viciosos si los datos grabados provinieron de un controlador previo.
+# =========================
+import csv as _csv
+
+_FUZZY_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "logica_difusa")
+_FUZZY_CSVS = [
+    os.path.join(_FUZZY_DIR, "datos_esp32_centroide.csv"),
+    os.path.join(_FUZZY_DIR, "datos_esp32_bisector.csv"),
+    os.path.join(_FUZZY_DIR, "datos_esp32_mom.csv"),
+]
+
+X_extra, Y_extra = [], []
+for _fcsv in _FUZZY_CSVS:
+    _fcsv = os.path.normpath(_fcsv)
+    if not os.path.isfile(_fcsv):
+        print(f"  [INFO] No encontrado: {os.path.basename(_fcsv)} (se omite)")
+        continue
+    _n = 0
+    with open(_fcsv, newline='') as _f:
+        _reader = _csv.DictReader(_f)
+        for _row in _reader:
+            try:
+                _e  = float(_row['error'])
+                _d  = float(_row['derivada'])
+                _it = float(_row['integral'])
+                _dp = fuzzy_centroide(_e, _d, _it)   # recalcular target
+                X_extra.append([_e, _d, _it])
+                Y_extra.append([_dp])
+                _n += 1
+            except (KeyError, ValueError):
+                continue
+    print(f"  + {os.path.basename(_fcsv)}: {_n} muestras reales del hardware")
+
+if X_extra:
+    X_all = np.concatenate([X_all, np.array(X_extra, dtype='float32')], axis=0)
+    Y_all = np.concatenate([Y_all, np.array(Y_extra, dtype='float32')], axis=0)
+
+print(f"Total muestras de entrenamiento: {len(X_all)}")
 
 # Mezclar aleatoriamente
 idx = np.random.permutation(len(X_all))

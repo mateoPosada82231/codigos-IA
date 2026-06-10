@@ -18,9 +18,9 @@ echo = Pin(ECHO_PIN, Pin.IN)
 fan = PWM(Pin(FAN_PIN), freq=25000, duty=0)
 
 # Variables de control
-DT_TARGET = 0.05        # Período objetivo (20 Hz)
-PWM_MAX   = 900
-PWM_MIN   = 237
+DT_TARGET = 0.02       # Período objetivo (20 Hz)
+PWM_MAX   = 750
+PWM_MIN   = 265
 ELEVACION_PWM = PWM_MAX
 ELEVACION_SEGUNDOS = 1.8
 DEFUZZ_METHOD = "centroid"

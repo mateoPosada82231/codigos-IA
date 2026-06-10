@@ -12,7 +12,7 @@ Archivos requeridos en el ESP32:
 
 La red es 2 -> 24 -> 24 -> 6 (ReLU en las 2 capas ocultas). Recibe
 [pos_normalizada, vel_normalizada] y produce los Q-values de las 6
-acciones PWM [200, 280, 360, 440, 520, 600].
+acciones PWM [275, 330, 385, 440, 520, 600].
 """
 import time
 import machine

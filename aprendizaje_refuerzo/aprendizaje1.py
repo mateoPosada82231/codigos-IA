@@ -10,21 +10,46 @@ import array
 NUM_STATES  = 11
 NUM_ACTIONS = 6
 
-# Estados discretos (cm)
-STATES = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+# Estados discretos (cm) — cubre el rango físico completo del tubo.
+# Antes era [10-20], lo que impedía distinguir "pelota pegada al sensor"
+# de "pelota en zona de control".
+STATES = [3, 5, 7, 9, 11, 13, 15, 17, 19, 22, 26]
+
+# Hash simple del espacio de estados: detecta cambios de STATES al cargar qtable.json
+_STATES_HASH = sum(STATES)
 
 # Rango PWM solicitado
-PWM_MIN = 210
-PWM_MAX = 600
+PWM_MIN = 275
+PWM_MAX = 750
 
-# Acciones discretas dentro de 200..400
-ACTIONS = [200, 280, 360, 440, 520, 600]
+# Acciones discretas dentro de 275..750
+ACTIONS = [275, 330, 410, 490, 600, 750]
 
 QTABLE_FILE  = 'qtable.json'
 SAVE_EVERY   = 100   # guardar cada N pasos
 RESET_QTABLE = False # True = borrar tabla y empezar de cero; False = continuar aprendizaje
 
 Q = [[0.0 for _ in range(NUM_ACTIONS)] for _ in range(NUM_STATES)]
+
+def _init_qtable_fisica():
+    """
+    Inicializa la tabla Q con priors físicos cuando no hay datos previos.
+    Principio: pelota alta (dist < setpoint) → PWM bajo para bajar;
+               pelota baja (dist > setpoint) → PWM alto para subir.
+    """
+    print("Inicializando tabla Q con priors físicos...")
+    for i in range(NUM_STATES):
+        dist = float(STATES[i])
+        err  = dist - SETPOINT
+        # Índice de acción ideal mapeado por error:
+        # err=-12 (pelota arriba del todo) → j_ideal=0 (PWM mínimo)
+        # err= 0  (en setpoint)            → j_ideal=2.5 (PWM medio)
+        # err=+11 (pelota abajo del todo)  → j_ideal=4.8 (PWM máximo)
+        j_ideal = (err + 12.0) / 24.0 * (NUM_ACTIONS - 1)
+        if j_ideal < 0.0:            j_ideal = 0.0
+        if j_ideal > NUM_ACTIONS - 1: j_ideal = float(NUM_ACTIONS - 1)
+        for j in range(NUM_ACTIONS):
+            Q[i][j] = 2.0 - abs(float(j) - j_ideal) * 0.8
 
 def load_qtable():
     import os
@@ -34,21 +59,37 @@ def load_qtable():
         except Exception:
             pass
         print("Tabla Q reiniciada desde cero")
+        _init_qtable_fisica()
         return
     try:
         with open(QTABLE_FILE, 'r') as f:
             data = ujson.load(f)
+        # Nuevo formato: {'hash': int, 'Q': [[...], ...]}
+        # Formato legacy: [[...], ...] (lista directa)
+        try:
+            saved_hash = data['hash']
+            Q_data     = data['Q']
+        except (TypeError, KeyError):
+            # Formato legacy o incompatible
+            print("Formato qtable legacy/incompatible, reiniciando con priors físicos")
+            _init_qtable_fisica()
+            return
+        if saved_hash != _STATES_HASH:
+            print("Espacio de estados cambiado, reiniciando con priors físicos")
+            _init_qtable_fisica()
+            return
         for i in range(NUM_STATES):
             for j in range(NUM_ACTIONS):
-                Q[i][j] = data[i][j]
+                Q[i][j] = Q_data[i][j]
         print("Tabla Q cargada desde", QTABLE_FILE)
     except Exception:
-        print("No se encontró tabla Q previa, iniciando desde cero")
+        print("No se encontró tabla Q previa, iniciando con priors físicos")
+        _init_qtable_fisica()
 
 def save_qtable():
     try:
         with open(QTABLE_FILE, 'w') as f:
-            ujson.dump(Q, f)
+            ujson.dump({'hash': _STATES_HASH, 'Q': Q}, f)
     except Exception as e:
         print("Error guardando tabla Q:", e)
 
@@ -143,10 +184,23 @@ def discretize_state(x):
             best_i = i
     return best_i
 
-def select_action(state_idx):
-    # epsilon=0 -> explora siempre | epsilon=1 -> explota siempre
+def select_action(state_idx, dist_cm):
+    # Convención estándar: epsilon = probabilidad de explorar aleatoriamente.
+    #   epsilon=0.20 -> 20% aleatorio, 80% greedy (Q-table)
+    #   epsilon=0.00 -> 100% greedy (modo ejecución)
+    #
+    # Anulación de seguridad física: si la pelota está en zona peligrosa,
+    # forzar siempre la acción correcta independientemente de epsilon.
+    if dist_cm < 7.0:       # pelota muy alta -> PWM mínimo obligatorio
+        return 0
+    if dist_cm > 28.0:      # pelota muy abajo -> PWM máximo obligatorio
+        return NUM_ACTIONS - 1
+
     if random.random() < EPSILON:
-        # explotar: mejor accion conocida
+        # Explorar: acción aleatoria (restringida a zona segura según posición)
+        return random.randint(0, NUM_ACTIONS - 1)
+    else:
+        # Explotar: mejor acción conocida
         best = 0
         best_q = Q[state_idx][0]
         for i in range(1, NUM_ACTIONS):
@@ -154,13 +208,17 @@ def select_action(state_idx):
                 best_q = Q[state_idx][i]
                 best = i
         return best
-    else:
-        # explorar: accion aleatoria
-        return random.randint(0, NUM_ACTIONS - 1)
 
 def reward_fn(dist):
-    # Penaliza alejamiento del setpoint
-    return -abs(dist - SETPOINT)
+    # Zonas de peligro: penalización fuerte para que el agente aprenda
+    # a NUNCA aplicar PWM alto cuando la pelota está pegada al sensor.
+    if dist < 5.0:        return -25.0          # peligroso: pelota contra el sensor
+    if dist > 30.0:       return -20.0          # peligroso: pelota en el fondo
+    err = abs(dist - SETPOINT)
+    if err < 0.5:         return  5.0           # excelente: muy cerca del setpoint
+    if err < 1.5:         return  2.0           # bien
+    if err < 3.0:         return  0.5           # aceptable
+    return -err * 1.5                           # malo: proporcional al error
 
 # --- Gestión de memoria para CSV (ring buffer en array, sin fragmentar heap) ---
 MAX_LOGS      = 300
@@ -212,6 +270,7 @@ print("Rampa completada. Iniciando Q-learning...")
 
 MAX_STEPS    = 800
 EPSILON_STEP = 0.20   # cuanto sube cada 100 pasos
+EPSILON_FIXED = False  # True = epsilon no cambia nunca (fijado desde control_maestro_rl.py)
 
 step = 0
 t_inicio = time.ticks_ms()
@@ -222,7 +281,7 @@ try:
         s = discretize_state(dist_now)
 
         # Acción
-        a = select_action(s)
+        a = select_action(s, dist_now)
         pwm_cmd = clamp_pwm(ACTIONS[a])
         fan.duty(pwm_cmd)
 
@@ -261,11 +320,12 @@ try:
             if _log_count < MAX_LOGS:
                 _log_count += 1
 
-        # Aumentar epsilon cada 100 pasos (tope 1.0)
+        # Aumentar epsilon cada 100 pasos (tope 1.0), solo si no está fijo
         if step % 100 == 0:
-            EPSILON = min(1.0, EPSILON + EPSILON_STEP)
+            if not EPSILON_FIXED:
+                EPSILON = min(1.0, EPSILON + EPSILON_STEP)
             save_qtable()
-            print("[paso {}] Tabla Q guardada | epsilon={:.1f}".format(step, EPSILON))
+            print("[paso {}] Tabla Q guardada | epsilon={:.2f}".format(step, EPSILON))
 
         print("dist={:.2f}cm | pwm={} | reward={:.2f} | eps={:.1f}".format(dist_now, pwm_cmd, r, EPSILON))
 
