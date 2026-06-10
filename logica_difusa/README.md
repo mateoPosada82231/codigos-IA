@@ -9,6 +9,14 @@ Controladores basados en lógica difusa (Fuzzy PD + Integral) para el sistema de
 | `levitacion_fuzzy_bisector.py` | Controlador fuzzy con defuzzificación **Bisector** |
 | `levitacion_fuzzy_centroide.py` | Controlador fuzzy con defuzzificación **Centroide** |
 | `levitacion_fuzzy_mom.py` | Controlador fuzzy con defuzzificación **Mean of Maximum (MOM)** |
+| `control_maestro_fuzzy.py` | Orquestador interactivo: sube controlador al ESP32, muestra terminal serie y descarga CSV |
+
+### Datos capturados (ESP32)
+| Archivo | Descripción |
+|---|---|
+| `datos_esp32_centroide.csv` | Datos de respuesta del controlador Centroide |
+| `datos_esp32_bisector.csv` | Datos de respuesta del controlador Bisector |
+| `datos_esp32_mom.csv` | Datos de respuesta del controlador MOM |
 
 ## Hardware requerido
 
@@ -24,6 +32,12 @@ Copiar el archivo deseado al ESP32 con **MicroPico** y ejecutarlo:
 ```python
 # En el REPL de MicroPython
 import levitacion_fuzzy_centroide  # o bisector / mom
+```
+
+O usar el orquestador desde el PC:
+
+```bash
+python control_maestro_fuzzy.py
 ```
 
 ## Lógica de control

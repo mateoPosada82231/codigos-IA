@@ -10,36 +10,55 @@ Red neuronal entrenada en PC con datos reales del sistema de levitación, export
 | `levitacion_red_neuronal_relu.py` | Controlador con red neuronal activación **ReLU** |
 | `levitacion_red_neuronal_sigmoid.py` | Controlador con red neuronal activación **Sigmoid** |
 | `levitacion_red_neuronal_tanh.py` | Controlador con red neuronal activación **Tanh** |
-| `pesos.txt` | Pesos exportados listos para cargar en el ESP32 |
 
 ### PC (Python)
 | Archivo | Descripción |
 |---|---|
-| `entrenar_red_levitador.py` | Entrena la red neuronal con los datos CSV |
-| `exportar_pesos_esp32.py` | Exporta pesos del modelo `.pkl` a código MicroPython |
-
-### Datos de entrenamiento
-| Archivo | Descripción |
-|---|---|
-| `datos_levitacion_10cm.csv` | Datos capturados a 10 cm de objetivo |
-| `datos_levitacion_15cm.csv` | Datos capturados a 15 cm de objetivo |
-| `datos_levitacion_20cm.csv` | Datos capturados a 20 cm de objetivo |
+| `entrenar_red_levitador.py` | Entrena la red neuronal con los datos CSV y guarda `pesos_red_levitador.json` |
+| `exportar_pesos_esp32.py` | Exporta pesos de `pesos_red_levitador.json` (o `.pkl`) al controlador MicroPython |
+| `control_maestro.py` | Orquestador interactivo: sube controlador al ESP32, captura datos y re-entrena en ciclo |
 
 ### Modelos guardados
 | Archivo | Descripción |
 |---|---|
-| `pesos_levitador_relu.pkl` | Modelo entrenado con ReLU |
-| `pesos_levitador_sigmoid.pkl` | Modelo entrenado con Sigmoid |
-| `pesos_levitador_tanh.pkl` | Modelo entrenado con Tanh |
+| `pesos_red_levitador.json` | Pesos de las tres variantes (relu/sigmoid/tanh) en formato JSON |
+
+### Datos capturados (ESP32)
+| Archivo | Descripción |
+|---|---|
+| `datos_esp32_relu.csv` | Datos de respuesta del controlador ReLU en el sistema real |
+| `datos_esp32_sigmoid.csv` | Datos de respuesta del controlador Sigmoid en el sistema real |
+| `datos_esp32_tanh.csv` | Datos de respuesta del controlador Tanh en el sistema real |
+
+### Gráficas generadas
+| Archivo | Descripción |
+|---|---|
+| `entrenamiento_levitador_relu.png` | Curva de entrenamiento — activación ReLU |
+| `entrenamiento_levitador_sigmoid.png` | Curva de entrenamiento — activación Sigmoid |
+| `entrenamiento_levitador_tanh.png` | Curva de entrenamiento — activación Tanh |
+| `comparacion_fuzzy_vs_rn_relu.png` | Comparación Fuzzy vs Red Neuronal ReLU |
+| `comparacion_fuzzy_vs_rn_sigmoid.png` | Comparación Fuzzy vs Red Neuronal Sigmoid |
+| `comparacion_fuzzy_vs_rn_tanh.png` | Comparación Fuzzy vs Red Neuronal Tanh |
 
 ## Flujo de trabajo
 
 ```
-1. Capturar datos → datos_levitacion_Xcm.csv
-2. Entrenar en PC → python entrenar_red_levitador.py
-3. Exportar pesos → python exportar_pesos_esp32.py pesos_levitador_sigmoid.pkl
-4. Copiar pesos.txt al ESP32 con MicroPico
-5. Ejecutar levitacion_red_neuronal_sigmoid.py en el ESP32
+1. Entrenar en PC con datos capturados:
+   python entrenar_red_levitador.py
+   (Genera pesos_red_levitador.json y gráficas de entrenamiento)
+
+2. Exportar pesos al controlador ESP32:
+   python exportar_pesos_esp32.py pesos_red_levitador.json sigmoid
+   (Inyecta pesos en levitacion_red_neuronal_sigmoid.py)
+
+3. Copiar controlador al ESP32 con MicroPico:
+   - levitacion_red_neuronal_sigmoid.py  (o relu / tanh)
+
+4. Ejecutar en el ESP32:
+   import levitacion_red_neuronal_sigmoid
+
+5. (Opcional) Usar el orquestador para todo el ciclo:
+   python control_maestro.py
 ```
 
 ## Arquitectura de la red
