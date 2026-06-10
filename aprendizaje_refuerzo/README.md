@@ -18,37 +18,38 @@ un problema distinto al de levitación.
 | Archivo | Descripción |
 |---|---|
 | `aprendizaje1.py` | Q-Learning tabular (11 estados × 6 acciones PWM). Corre directamente en el ESP32. |
+| `qtable.json` | Tabla Q aprendida, descargada del ESP32 (generada). |
 
 ### DQN levitador — PC (Python)
 | Archivo | Descripción |
 |---|---|
 | `dqn_levitador.py` | Simulador `LevitadorEnv` (1D, sistema de primer orden hacia `p_eq(PWM)`), entrenamiento Q-Learning baseline, entrenamiento DQN con replay buffer y target network, comparación cuantitativa y gráfica. |
-| `qtable_levitador.npy` | Tabla Q 11×6 aprendida por el baseline tabular (generada). |
-| `dqn_levitador.pth` | Pesos de la DQN entrenada (generados). |
-| `resultados/dqn_levitador.png` | Curva de aprendizaje y distribución final (generada). |
 | `exportar_pesos_dqn_levitador.py` | Exporta `dqn_levitador.pth` a `pesos_dqn_levitador.py` en formato MicroPython. |
 | `pesos_dqn_levitador.py` | Pesos DQN exportados, en listas planas listas para el ESP32 (generado). |
+| `resultados/dqn_levitador.png` | Curva de aprendizaje y distribución final (generada). |
 
 ### DQN levitador — ESP32 (MicroPython)
 | Archivo | Descripción |
 |---|---|
 | `dqn_levitador_esp32.py` | Inferencia DQN en el ESP32 con 1 sensor HC-SR04, derivada de velocidad filtrada, normalización y forward pass manual. |
 
-### Ejemplo DQN con tres sensores (académico, no aplica al levitador)
+### Orquestador PC↔ESP32
 | Archivo | Descripción |
 |---|---|
-| `dqn_tres_sensores.py` | Entorno simulado con tres sensores (izq./frente/der.) y cinco acciones (avanzar, retroceder, girar, mantener). Demuestra el marco DQN sobre un problema distinto. |
-| `dqn_tres_sensores.pth` | Pesos del ejemplo (3 → 64 → 64 → 5). |
-| `exportar_pesos_dqn.py` | Exporta esos pesos a `pesos_dqn.py`. |
-| `dqn_esp32.py` | Inferencia en ESP32 con tres HC-SR04 (TRIG 5/4, 18/19, 21/22). |
-| `pesos_dqn.py` | Pesos exportados del ejemplo. |
+| `control_maestro_rl.py` | Menú interactivo para elegir controlador, subirlo al ESP32, monitorizar serie y re-entrenar. |
+
+### Datos capturados (ESP32)
+| Archivo | Descripción |
+|---|---|
+| `datos_esp32_qlearning.csv` | Datos de respuesta del controlador Q-Learning en el sistema real. |
+| `datos_esp32_dqn.csv` | Datos de respuesta del controlador DQN en el sistema real. |
 
 ## Flujo de trabajo — DQN del levitador
 
 ```
 1. Entrenar y validar en PC:
    python dqn_levitador.py
-   (Genera qtable_levitador.npy, dqn_levitador.pth y la grafica)
+   (Genera qtable.json, dqn_levitador.pth y la grafica)
 
 2. Exportar pesos a MicroPython:
    python exportar_pesos_dqn_levitador.py
@@ -60,6 +61,9 @@ un problema distinto al de levitación.
 
 4. Ejecutar en el ESP32:
    import dqn_levitador_esp32
+
+5. (Opcional) Usar el orquestador para todo el ciclo:
+   python control_maestro_rl.py
 ```
 
 ## Comparativa DQN vs Q-Learning (simulador)

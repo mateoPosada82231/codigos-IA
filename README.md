@@ -8,7 +8,8 @@ Repositorio de algoritmos de control inteligente para ESP32: lógica difusa, red
 codigos-IA/
 ├── logica_difusa/          # Controladores Fuzzy PD + Integral
 ├── redes_neuronales/       # Red neuronal entrenada en PC, inferencia en ESP32
-├── aprendizaje_refuerzo/   # Q-Learning y DQN (tres sensores)
+├── aprendizaje_refuerzo/   # Q-Learning y DQN para levitación
+├── LLM/                    # Sistema RAG para consultas sobre el proyecto
 └── graficas-informe-1/     # Gráficas y visualizaciones del informe
 ```
 
@@ -27,10 +28,15 @@ Red neuronal FCLayer(3→16→12→8→1) entrenada con datos reales, exportada 
 - Datos CSV de captura real del sistema
 
 ### [aprendizaje_refuerzo/](aprendizaje_refuerzo/README.md)
-Q-Learning clásico en ESP32 y DQN para navegación con tres sensores ultrasónicos.
+Q-Learning clásico en ESP32 y DQN para levitación con un sensor ultrasónico.
 - `aprendizaje1.py` — Q-Learning directo en ESP32
-- `dqn_tres_sensores.py` — entrenamiento DQN en PC (gymnasium + torch)
-- `dqn_esp32.py` — inferencia DQN en ESP32 (sin dependencias externas)
+- `dqn_levitador.py` — entrenamiento DQN en PC (gymnasium + torch)
+- `dqn_levitador_esp32.py` — inferencia DQN en ESP32 (sin dependencias externas)
+- `control_maestro_rl.py` — orquestador interactivo PC↔ESP32
+
+### [LLM/](LLM/README.md)
+Sistema de consulta RAG (Retrieval-Augmented Generation) sobre el informe del proyecto.
+- `rag_levitador.py` — procesa el informe LaTeX y responde preguntas con Ollama
 
 ## Hardware
 
