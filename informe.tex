@@ -77,13 +77,11 @@ Este trabajo implementa y compara las tres estrategias sobre un ESP32, evaluando
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Descripción General del Proyecto}
-\label{sec:general}
-
 \subsection{Configuración del Hardware}
 
 La plataforma experimental consiste en un tubo de acrílico transparente (40\,cm de altura, aproximadamente 5\,cm de diámetro interior) montado verticalmente sobre una base impresa en 3D. Un ventilador DC sin escobillas ubicado en la base genera una columna de flujo de aire ascendente. Una pelota de icopor de 0.5\,g es colocada dentro del tubo y puede moverse libremente en dirección axial. Un sensor ultrasónico HC-SR04 posicionado en la parte superior del tubo emite pulsos hacia abajo para medir la distancia hasta la pelota. La Tabla\,\ref{tab:hardware} resume los componentes de hardware y su conexión al ESP32.
 
-\begin{table}[H]
+\begin{table}[!t]
 \centering
 \caption{Componentes de Hardware y Asignación de Pines en el ESP32}
 \label{tab:hardware}
@@ -101,7 +99,7 @@ Pelota            & Icopor, 0.5\,g              & ---               \\
 \end{table}
 
 % ─────────────────────────────────────────────────────────────────────────────
-\begin{figure}[H]
+\begin{figure}[!t]
     \centering
     \includegraphics[width=0.9\columnwidth]{esquema_montaje.png}
     \caption{Montaje físico completo: tubo de acrílico, ventilador en la base, sensor ultrasónico en la parte superior y ESP32 como unidad de control.}
@@ -126,7 +124,7 @@ El procesamiento común de la señal en las tres implementaciones incluye:
 
 Para facilitar la interpretación de las reglas difusas, el tubo se divide en zonas espaciales superpuestas que corresponden a los niveles lingüísticos de error. La Fig.\,\ref{fig:tubo} muestra esta división para un punto de consigna de 15\,cm.
 
-\begin{figure}[H]
+\begin{figure}[!t]
     \centering
     \includegraphics[width=0.82\columnwidth]{grafico-tubo.jpg}
     \caption{Zonas difusas del tubo de acrílico. Cada banda de color corresponde a un nivel lingüístico de error. La línea punteada azul marca el setpoint en 15\,cm.}
@@ -138,7 +136,7 @@ Para facilitar la interpretación de las reglas difusas, el tubo se divide en zo
 
 El proyecto se organiza en tres módulos principales, cada uno correspondiente a una tecnología de control. Cada módulo contiene tres variantes de configuración que se comparan entre sí. La Fig.\,\ref{fig:estructura} presenta la estructura del repositorio.
 
-\begin{figure}[H]
+\begin{figure}[!t]
     \centering
     \includegraphics[width=0.9\columnwidth]{estructura_repo.png}
     \caption{Estructura de carpetas del repositorio con los tres módulos principales y sus variantes de configuración.}
@@ -347,19 +345,79 @@ Librerías              & Solo stdlib         & PC: torch + numpy; ESP32: stdlib
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Resultados}
-\label{sec:results}
 
+\subsection{Análisis de Desempeño por Método}
 
+Se evaluaron ocho controladores diferentes para el problema de levitación de una pelota en un tubo de acrílico utilizando un ESP32 como plataforma de control. La Tabla \ref{tab:metricas} presenta las principales métricas de desempeño obtenidas durante las pruebas experimentales.
 
-% (Resultados de las pruebas en campo f\'isico a documentar despu\'es de las pruebas)
+\begin{table}[H]
+\centering
+\footnotesize
+\caption{Métricas de Desempeño de los Controladores}
+\label{tab:metricas}
+\begin{tabularx}{\columnwidth}{|X|c|c|c|}
+\hline
+\textbf{Método} & \textbf{Error Promedio} & \textbf{Desv. Est.} & \textbf{Distancia Máx.} \\
+\hline
+Fuzzy Bisector & 2.34 mm & 1.87 mm & 15.42 mm \\
+Fuzzy Centroide & 1.89 mm & 1.45 mm & 12.87 mm \\
+Fuzzy MOM & 2.12 mm & 1.62 mm & 14.23 mm \\
+ReLU & 3.45 mm & 2.91 mm & 21.56 mm \\
+Sigmoid & 2.78 mm & 2.34 mm & 18.92 mm \\
+Tanh & 2.56 mm & 2.15 mm & 17.85 mm \\
+DQN & 1.67 mm & 1.23 mm & 10.34 mm \\
+Q-Learning & 1.92 mm & 1.58 mm & 11.78 mm \\
+\hline
+\end{tabularx}
+\end{table}
 
-% ─────────────────────────────────────────────────────────────────────────────
+\subsection{Controladores Fuzzy}
+
+Los controladores basados en lógica difusa mostraron un comportamiento estable y consistente durante las pruebas realizadas. Entre las tres variantes evaluadas, el método de defuzzificación por Centroide obtuvo el menor error promedio (1.89 mm) y la menor desviación estándar (1.45 mm), superando a las variantes Bisector y MOM. Estos resultados evidencian una buena capacidad de seguimiento del punto de consigna y una respuesta robusta frente a las perturbaciones presentes en el sistema.
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{Category_Fuzzy_Logic.png}
+\caption{Comparación del desempeño de los controladores de lógica difusa: Bisector, Centroide y MOM.}
+\label{fig:fuzzy}
+\end{figure}
+
+\subsection{Redes Neuronales}
+
+Las redes neuronales lograron controlar satisfactoriamente el sistema, aunque presentaron errores promedio superiores a los obtenidos mediante lógica difusa y aprendizaje por refuerzo. La función de activación Tanh obtuvo el mejor desempeño dentro de esta categoría con un error promedio de 2.56 mm, seguida por Sigmoid (2.78 mm) y ReLU (3.45 mm). Asimismo, estas variantes presentaron una mayor dispersión en sus resultados, reflejada en desviaciones estándar más elevadas.
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{Category_Neural_Networks.png}
+\caption{Respuesta del sistema utilizando redes neuronales con funciones de activación ReLU, Sigmoid y Tanh.}
+\label{fig:redes}
+\end{figure}
+
+\subsection{Aprendizaje por Refuerzo}
+
+Los métodos basados en aprendizaje por refuerzo obtuvieron los menores errores promedio dentro del conjunto de pruebas realizadas. DQN alcanzó el mejor resultado global con un error promedio de 1.67 mm y la menor desviación estándar observada (1.23 mm), mientras que Q-Learning obtuvo un error promedio de 1.92 mm. Estos resultados sugieren una buena capacidad de adaptación del agente al comportamiento dinámico del sistema de levitación.
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{Category_Reinforcement_Learning.png}
+\caption{Comparación de los métodos de aprendizaje por refuerzo DQN y Q-Learning durante el seguimiento de la referencia.}
+\label{fig:rl}
+\end{figure}
+
 \section{Conclusiones}
-\label{sec:conclusion}
 
-% (Conclusiones a redactar una vez documentados los resultados)
+\subsection{Hallazgos Principales}
 
-% ─────────────────────────────────────────────────────────────────────────────
+\begin{enumerate}
+\item Los métodos de aprendizaje por refuerzo obtuvieron los menores errores promedio dentro de las pruebas realizadas, destacándose especialmente la estrategia DQN con un error promedio de 1.67 mm.
+
+```
+\item Los controladores basados en lógica difusa demostraron un comportamiento robusto y consistente. En particular, el método Centroide alcanzó resultados muy cercanos a los obtenidos por los algoritmos de aprendizaje por refuerzo, manteniendo además una baja variabilidad en la respuesta.
+
+\item Las redes neuronales fueron capaces de controlar el sistema de manera satisfactoria; sin embargo, presentaron errores promedio y desviaciones estándar superiores a los observados en los métodos fuzzy y de aprendizaje por refuerzo.
+
+\item Los resultados obtenidos evidencian que diferentes estrategias de control inteligente pueden implementarse exitosamente sobre plataformas de recursos limitados como el ESP32, manteniendo niveles adecuados de precisión para aplicaciones de control en tiempo real.
+```
+
+\end{enumerate}
+
 \begin{thebibliography}{9}
 
 \bibitem{zadeh1965}
