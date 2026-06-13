@@ -159,36 +159,36 @@ def draw_estructura():
 
     modules = [
         {
-            "name": "logica_difusa/",
+            "name": "fuzzy/",
             "x": 0.55, "color": "#e67e22",
             "tag": "Fuzzy PD+I  (FAM 9\u00d77)",
             "files": [
-                "levitacion_fuzzy_centroide.py",
-                "levitacion_fuzzy_bisector.py",
-                "levitacion_fuzzy_mom.py",
+                "controller_centroid.py",
+                "controller_bisector.py",
+                "controller_mom.py",
             ],
         },
         {
-            "name": "redes_neuronales/",
+            "name": "neural_networks/",
             "x": 4.45, "color": "#27ae60",
             "tag": "FCLayer(3 \u2192 16 \u2192 12 \u2192 8 \u2192 1)",
             "files": [
-                "entrenar_red_levitador.py",
-                "exportar_pesos_esp32.py",
-                "levitacion_red_neuronal_sigmoid.py",
-                "levitacion_red_neuronal_tanh.py",
-                "levitacion_red_neuronal_relu.py",
+                "train.py",
+                "export_weights.py",
+                "controller_sigmoid.py",
+                "controller_tanh.py",
+                "controller_relu.py",
             ],
         },
         {
-            "name": "aprendizaje_refuerzo/",
+            "name": "reinforcement_learning/",
             "x": 8.35, "color": PURPLE,
             "tag": "Q-Learning  +  DQN",
             "files": [
-                "aprendizaje1.py  (Q-Learning)",
-                "dqn_levitador.py  (PC training)",
-                "dqn_levitador_esp32.py  (inference)",
-                "exportar_pesos_dqn_levitador.py",
+                "qlearning_esp32.py  (Q-Learning)",
+                "dqn_train.py  (PC training)",
+                "dqn_esp32.py  (inference)",
+                "export_dqn_weights.py",
             ],
         },
     ]

@@ -457,7 +457,7 @@ def plot_results(ql_rewards, dqn_rewards, dqn_moving, out_path):
 # 7. Main
 # ============================================================
 if __name__ == "__main__":
-    os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "resultados"), exist_ok=True)
+    os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "figures"), exist_ok=True)
 
     print("=" * 60)
     print("0) Cargando transiciones expertas de lógica difusa")
@@ -524,7 +524,7 @@ if __name__ == "__main__":
         env, episodes=800,
         fuzzy_seed=fuzzy_transitions if fuzzy_transitions else None
     )
-    torch.save(net.state_dict(), os.path.join(os.path.dirname(os.path.abspath(__file__)), "dqn_levitador.pth"))
+    torch.save(net.state_dict(), os.path.join(os.path.dirname(os.path.abspath(__file__)), "dqn_model.pth"))
 
     print()
     print("=" * 60)
@@ -548,8 +548,8 @@ if __name__ == "__main__":
 
     plot_results(ql_rewards, dqn_rewards, dqn_moving,
                  os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              "resultados", "dqn_levitador.png"))
+                              os.pardir, "figures", "dqn_training.png"))
     print("\nListo. Archivos generados:")
     print("  qtable_levitador.npy")
-    print("  dqn_levitador.pth")
-    print("  resultados/dqn_levitador.png")
+    print("  dqn_model.pth")
+    print("  figures/dqn_training.png")

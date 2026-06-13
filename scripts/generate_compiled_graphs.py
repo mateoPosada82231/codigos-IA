@@ -3,25 +3,25 @@ import matplotlib.pyplot as plt
 import os
 
 # Crear directorio para guardar gráficas
-output_dir = r"c:\codigos-IA\graficas_compiladas"
+output_dir = r"figures"
 os.makedirs(output_dir, exist_ok=True)
 
 # Organizar métodos por categoría
 fuzzy_methods = {
-    'Bisector': r'c:\codigos-IA\logica_difusa\datos_esp32_bisector.csv',
-    'Centroide': r'c:\codigos-IA\logica_difusa\datos_esp32_centroide.csv',
-    'MOM': r'c:\codigos-IA\logica_difusa\datos_esp32_mom.csv',
+    'Bisector': r'fuzzy\data_bisector.csv',
+    'Centroide': r'fuzzy\data_centroid.csv',
+    'MOM': r'fuzzy\data_mom.csv',
 }
 
 neural_methods = {
-    'ReLU': r'c:\codigos-IA\redes_neuronales\datos_esp32_relu.csv',
-    'Sigmoid': r'c:\codigos-IA\redes_neuronales\datos_esp32_sigmoid.csv',
-    'Tanh': r'c:\codigos-IA\redes_neuronales\datos_esp32_tanh.csv',
+    'ReLU': r'neural_networks\data_relu.csv',
+    'Sigmoid': r'neural_networks\data_sigmoid.csv',
+    'Tanh': r'neural_networks\data_tanh.csv',
 }
 
 rl_methods = {
-    'DQN': r'c:\codigos-IA\aprendizaje_refuerzo\datos_esp32_dqn.csv',
-    'Q-Learning': r'c:\codigos-IA\aprendizaje_refuerzo\datos_esp32_qlearning.csv',
+    'DQN': r'reinforcement_learning\data_dqn.csv',
+    'Q-Learning': r'reinforcement_learning\data_qlearning.csv',
 }
 
 # Configurar estilo
@@ -133,14 +133,14 @@ print("✓ Saved: Category_Reinforcement_Learning.png")
 # 4. COMPARATIVA GENERAL
 print("4. Creating overall comparison...")
 all_methods = {
-    'Fuzzy Bisector': r'c:\codigos-IA\logica_difusa\datos_esp32_bisector.csv',
-    'Fuzzy Centroide': r'c:\codigos-IA\logica_difusa\datos_esp32_centroide.csv',
-    'Fuzzy MOM': r'c:\codigos-IA\logica_difusa\datos_esp32_mom.csv',
-    'NN ReLU': r'c:\codigos-IA\redes_neuronales\datos_esp32_relu.csv',
-    'NN Sigmoid': r'c:\codigos-IA\redes_neuronales\datos_esp32_sigmoid.csv',
-    'NN Tanh': r'c:\codigos-IA\redes_neuronales\datos_esp32_tanh.csv',
-    'RL DQN': r'c:\codigos-IA\aprendizaje_refuerzo\datos_esp32_dqn.csv',
-    'RL Q-Learning': r'c:\codigos-IA\aprendizaje_refuerzo\datos_esp32_qlearning.csv',
+    'Fuzzy Bisector': r'fuzzy\data_bisector.csv',
+    'Fuzzy Centroide': r'fuzzy\data_centroid.csv',
+    'Fuzzy MOM': r'fuzzy\data_mom.csv',
+    'NN ReLU': r'neural_networks\data_relu.csv',
+    'NN Sigmoid': r'neural_networks\data_sigmoid.csv',
+    'NN Tanh': r'neural_networks\data_tanh.csv',
+    'RL DQN': r'reinforcement_learning\data_dqn.csv',
+    'RL Q-Learning': r'reinforcement_learning\data_qlearning.csv',
 }
 
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
@@ -177,14 +177,14 @@ print("✓ Saved: Comparison_All_Methods.png")
 print("\n5. Creating individual detailed graphs (4 subplots each)...")
 
 all_csv_files = {
-    'Fuzzy Bisector': r'c:\codigos-IA\logica_difusa\datos_esp32_bisector.csv',
-    'Fuzzy Centroide': r'c:\codigos-IA\logica_difusa\datos_esp32_centroide.csv',
-    'Fuzzy MOM': r'c:\codigos-IA\logica_difusa\datos_esp32_mom.csv',
-    'Neural Network ReLU': r'c:\codigos-IA\redes_neuronales\datos_esp32_relu.csv',
-    'Neural Network Sigmoid': r'c:\codigos-IA\redes_neuronales\datos_esp32_sigmoid.csv',
-    'Neural Network Tanh': r'c:\codigos-IA\redes_neuronales\datos_esp32_tanh.csv',
-    'Reinforcement Learning DQN': r'c:\codigos-IA\aprendizaje_refuerzo\datos_esp32_dqn.csv',
-    'Reinforcement Learning Q-Learning': r'c:\codigos-IA\aprendizaje_refuerzo\datos_esp32_qlearning.csv',
+    'Fuzzy Bisector': r'fuzzy\data_bisector.csv',
+    'Fuzzy Centroide': r'fuzzy\data_centroid.csv',
+    'Fuzzy MOM': r'fuzzy\data_mom.csv',
+    'Neural Network ReLU': r'neural_networks\data_relu.csv',
+    'Neural Network Sigmoid': r'neural_networks\data_sigmoid.csv',
+    'Neural Network Tanh': r'neural_networks\data_tanh.csv',
+    'Reinforcement Learning DQN': r'reinforcement_learning\data_dqn.csv',
+    'Reinforcement Learning Q-Learning': r'reinforcement_learning\data_qlearning.csv',
 }
 
 for nombre, ruta in all_csv_files.items():

@@ -4,19 +4,19 @@ import os
 from pathlib import Path
 
 # Crear directorio para guardar gráficas
-output_dir = r"c:\codigos-IA\graficas_compiladas"
+output_dir = r"figures"
 os.makedirs(output_dir, exist_ok=True)
 
 # Lista de archivos CSV con sus rutas
 csv_files = {
-    'Fuzzy Bisector': r'c:\codigos-IA\logica_difusa\datos_esp32_bisector.csv',
-    'Fuzzy Centroide': r'c:\codigos-IA\logica_difusa\datos_esp32_centroide.csv',
-    'Fuzzy MOM': r'c:\codigos-IA\logica_difusa\datos_esp32_mom.csv',
-    'Red Neuronal ReLU': r'c:\codigos-IA\redes_neuronales\datos_esp32_relu.csv',
-    'Red Neuronal Sigmoid': r'c:\codigos-IA\redes_neuronales\datos_esp32_sigmoid.csv',
-    'Red Neuronal Tanh': r'c:\codigos-IA\redes_neuronales\datos_esp32_tanh.csv',
-    'RL DQN': r'c:\codigos-IA\aprendizaje_refuerzo\datos_esp32_dqn.csv',
-    'RL Q-Learning': r'c:\codigos-IA\aprendizaje_refuerzo\datos_esp32_qlearning.csv',
+    'Fuzzy Bisector': r'fuzzy\data_bisector.csv',
+    'Fuzzy Centroide': r'fuzzy\data_centroid.csv',
+    'Fuzzy MOM': r'fuzzy\data_mom.csv',
+    'Red Neuronal ReLU': r'neural_networks\data_relu.csv',
+    'Red Neuronal Sigmoid': r'neural_networks\data_sigmoid.csv',
+    'Red Neuronal Tanh': r'neural_networks\data_tanh.csv',
+    'RL DQN': r'reinforcement_learning\data_dqn.csv',
+    'RL Q-Learning': r'reinforcement_learning\data_qlearning.csv',
 }
 
 # Configurar estilo

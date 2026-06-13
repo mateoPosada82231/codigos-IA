@@ -1,12 +1,12 @@
 """
-control_maestro_fuzzy.py
+maestro.py
 ========================
 Orquestador interactivo para los controladores de Lógica Difusa:
 
   1. Menú para elegir qué controlador ejecutar en el ESP32:
-       1. Fuzzy Centroide  (levitacion_fuzzy_centroide.py)
-       2. Fuzzy Bisector   (levitacion_fuzzy_bisector.py)
-       3. Fuzzy MOM        (levitacion_fuzzy_mom.py)
+       1. Fuzzy Centroide  (controller_centroid.py)
+       2. Fuzzy Bisector   (controller_bisector.py)
+       3. Fuzzy MOM        (controller_mom.py)
 
   2. Pide setpoint en el PC, sube el archivo sin input() al ESP32.
   3. Abre mini-terminal serie (pyserial): muestra output y envía Ctrl+C.
@@ -14,7 +14,7 @@ Orquestador interactivo para los controladores de Lógica Difusa:
   5. Pregunta si ejecutar de nuevo (mismo método o volver al menú).
 
 Uso:
-    python control_maestro_fuzzy.py
+    python maestro.py
 
 Requisitos:
     pip install adafruit-ampy pyserial
@@ -31,9 +31,9 @@ import time
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 CONTROLADORES = {
-    "centroide": os.path.join(SCRIPT_DIR, "levitacion_fuzzy_centroide.py"),
-    "bisector":  os.path.join(SCRIPT_DIR, "levitacion_fuzzy_bisector.py"),
-    "mom":       os.path.join(SCRIPT_DIR, "levitacion_fuzzy_mom.py"),
+    "centroide": os.path.join(SCRIPT_DIR, "controller_centroid.py"),
+    "bisector":  os.path.join(SCRIPT_DIR, "controller_bisector.py"),
+    "mom":       os.path.join(SCRIPT_DIR, "controller_mom.py"),
 }
 
 CSV_NOMBRES = {
@@ -118,20 +118,20 @@ def _preparar_archivo(metodo: str, setpoint: float) -> str:
                 lineas[fin].strip() == ""
             ):
                 fin += 1
-            salida.append(f"setpoint = {setpoint:.2f}  # fijado desde control_maestro_fuzzy.py\n")
+            salida.append(f"setpoint = {setpoint:.2f}  # fijado desde maestro.py\n")
             i = fin
             continue
 
         # Reemplazar asignación directa de setpoint si no viene de input
         if re.match(r'\s*setpoint\s*=\s*[\d.]+', linea) and "input" not in linea and \
                 "control_maestro" not in linea:
-            salida.append(f"setpoint = {setpoint:.2f}  # fijado desde control_maestro_fuzzy.py\n")
+            salida.append(f"setpoint = {setpoint:.2f}  # fijado desde maestro.py\n")
             i += 1
             continue
 
         # Guardado automático del CSV
         if "resp" in linea and "input(" in linea and "strip().lower()" in linea:
-            salida.append("    resp = 's'  # guardado automático desde control_maestro_fuzzy.py\n")
+            salida.append("    resp = 's'  # guardado automático desde maestro.py\n")
             i += 1
             continue
 
@@ -287,9 +287,9 @@ def _mostrar_menu():
     print("  CONTROL MAESTRO — Lógica Difusa  (Levitador de Pelota)")
     print("═" * 60)
     print("  Selecciona el método de desfusificación:\n")
-    print("    1. Centroide   (levitacion_fuzzy_centroide.py)")
-    print("    2. Bisector    (levitacion_fuzzy_bisector.py)")
-    print("    3. MOM         (levitacion_fuzzy_mom.py)")
+    print("    1. Centroide   (controller_centroid.py)")
+    print("    2. Bisector    (controller_bisector.py)")
+    print("    3. MOM         (controller_mom.py)")
     print("    0. Salir")
     print("─" * 60)
 

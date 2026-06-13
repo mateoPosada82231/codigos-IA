@@ -17,7 +17,7 @@ acciones PWM [275, 330, 385, 440, 520, 600].
 import time
 import machine
 import array
-import pesos_dqn_levitador as P
+import dqn_weights as P
 
 
 # ============================================================

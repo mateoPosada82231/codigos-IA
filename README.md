@@ -1,51 +1,130 @@
 # codigos-IA
 
-Repositorio de algoritmos de control inteligente para ESP32: lógica difusa, redes neuronales y aprendizaje por refuerzo aplicados a sistemas embebidos.
+Sistemas de Control Inteligente para Levitación en un Tubo de Acrílico Usando un Microcontrolador ESP32.
 
-## Estructura del proyecto
+Este repositorio implementa y compara tres estrategias de control inteligente —**lógica difusa**, **redes neuronales** y **aprendizaje por refuerzo**— para estabilizar una pelota de icopor dentro de un tubo de acrílico vertical mediante un ventilador DC controlado por PWM. Incluye además un sistema de consulta RAG para interrogar el proyecto en lenguaje natural.
+
+---
+
+## Estructura del Repositorio
 
 ```
 codigos-IA/
-├── logica_difusa/          # Controladores Fuzzy PD + Integral
-├── redes_neuronales/       # Red neuronal entrenada en PC, inferencia en ESP32
-├── aprendizaje_refuerzo/   # Q-Learning y DQN para levitación
-├── LLM/                    # Sistema RAG para consultas sobre el proyecto
-└── graficas-informe-1/     # Gráficas y visualizaciones del informe
+├── fuzzy/                   # Controladores Fuzzy PD+I (3 métodos de defuzzificación)
+├── neural_networks/         # Red neuronal FCLayer(3→16→12→8→1) entrenada en PC
+├── reinforcement_learning/  # Q-Learning tabular (ESP32) y DQN (PC + ESP32)
+├── llm/                     # Sistema RAG con ChromaDB + Ollama
+├── figures/                 # Gráficas e imágenes del informe
+├── scripts/                 # Scripts de generación de gráficas
+├── informe.tex              # Informe académico en LaTeX (IEEEtran)
+└── README.md
 ```
 
-## Módulos
-
-### [logica_difusa/](logica_difusa/README.md)
-Controladores fuzzy con tres métodos de defuzzificación para levitación de pelota.
-- `levitacion_fuzzy_centroide.py` — defuzzificación por Centroide
-- `levitacion_fuzzy_bisector.py` — defuzzificación por Bisector
-- `levitacion_fuzzy_mom.py` — defuzzificación por Mean of Maximum
-
-### [redes_neuronales/](redes_neuronales/README.md)
-Red neuronal FCLayer(3→16→12→8→1) entrenada con datos reales, exportada al ESP32.
-- Tres variantes de activación: ReLU, Sigmoid, Tanh
-- Scripts de entrenamiento y exportación de pesos
-- Datos CSV de captura real del sistema
-
-### [aprendizaje_refuerzo/](aprendizaje_refuerzo/README.md)
-Q-Learning clásico en ESP32 y DQN para levitación con un sensor ultrasónico.
-- `aprendizaje1.py` — Q-Learning directo en ESP32
-- `dqn_levitador.py` — entrenamiento DQN en PC (gymnasium + torch)
-- `dqn_levitador_esp32.py` — inferencia DQN en ESP32 (sin dependencias externas)
-- `control_maestro_rl.py` — orquestador interactivo PC↔ESP32
-
-### [LLM/](LLM/README.md)
-Sistema de consulta RAG (Retrieval-Augmented Generation) sobre el informe del proyecto.
-- `rag_levitador.py` — procesa el informe LaTeX y responde preguntas con Ollama
+---
 
 ## Hardware
 
-- **Microcontrolador:** ESP32
-- **Sensores:** HC-SR04 (ultrasónico)
-- **Actuador:** Electroimán + driver PWM
+| Componente         | Descripción                          | Pin ESP32      |
+|--------------------|--------------------------------------|----------------|
+| Microcontrolador   | ESP32 (MicroPython)                  | —              |
+| Sensor ultrasónico | HC-SR04                              | TRIG: GPIO 27  |
+|                    |                                      | ECHO: GPIO 26  |
+| Actuador           | Ventilador DC sin escobillas         | GPIO 14 (PWM)  |
+| Estructura         | Tubo de acrílico 40 cm               | —              |
+| Pelota             | Icopor 0.5 g (no perfectamente esférica) | —          |
+
+---
 
 ## Dependencias PC
 
 ```bash
-pip install numpy matplotlib scikit-fuzzy gymnasium torch
+pip install numpy matplotlib scikit-fuzzy gymnasium torch pandas
 ```
+
+Para el módulo RAG se requieren adicionalmente:
+
+```bash
+pip install ollama chromadb langchain langchain-ollama langchain-chroma langchain-core
+ollama pull llama3.2
+ollama pull nomic-embed-text
+```
+
+---
+
+## Guía Rápida
+
+### 1. Probar un controlador en el ESP32
+
+Cada módulo tiene un **orquestador** (`maestro.py`) que automatiza el ciclo completo:
+
+```bash
+cd fuzzy
+python maestro.py        # Menú: elegir método, subir a ESP32, monitorear
+```
+
+```bash
+cd neural_networks
+python maestro.py        # Menú: elegir activación, entrenar, exportar, desplegar
+```
+
+```bash
+cd reinforcement_learning
+python maestro.py        # Menú: Q-Learning o DQN, subir, capturar datos
+```
+
+### 2. Entrenar desde cero
+
+```bash
+cd neural_networks
+python train.py          # Entrena las 3 variantes con datos CSV
+```
+
+```bash
+cd reinforcement_learning
+python dqn_train.py      # Entrena DQN en simulador 1D
+```
+
+### 3. Consultar el proyecto con IA
+
+```bash
+cd llm
+python rag.py "¿Cuál es el error promedio del controlador Centroide?"
+```
+
+---
+
+## Trabajo por Módulos
+
+| Módulo | Descripción | Documentación |
+|--------|-------------|---------------|
+| [`fuzzy/`](fuzzy/README.md) | 3 controladores difusos (Centroide, Bisector, MOM) | FAM 9×7, PD+I, defuzzificación |
+| [`neural_networks/`](neural_networks/README.md) | Red neuronal entrenada en PC, inferencia en ESP32 | 3 activaciones (ReLU, Sigmoid, Tanh) |
+| [`reinforcement_learning/`](reinforcement_learning/README.md) | Q-Learning en ESP32 y DQN híbrida PC/ESP32 | Tabla 11×6 vs red 2→24→24→6 |
+| [`llm/`](llm/README.md) | Sistema RAG con ChromaDB y Ollama | Consultas en lenguaje natural |
+
+---
+
+## Resultados Experimentales
+
+| Método | Error Promedio | Desv. Est. |
+|--------|---------------|------------|
+| DQN | 1.67 mm | 1.23 mm |
+| Fuzzy Centroide | 1.89 mm | 1.45 mm |
+| Q-Learning | 1.92 mm | 1.58 mm |
+| Fuzzy MOM | 2.12 mm | 1.62 mm |
+| Fuzzy Bisector | 2.34 mm | 1.87 mm |
+| NN Tanh | 2.56 mm | 2.15 mm |
+| NN Sigmoid | 2.78 mm | 2.34 mm |
+| NN ReLU | 3.45 mm | 2.91 mm |
+
+---
+
+## Informe Académico
+
+El archivo [`informe.tex`](informe.tex) contiene el documento completo en formato IEEEtran (español) con descripción detallada del proyecto, análisis de cada técnica, resultados y conclusiones. Las imágenes referenciadas están en [`figures/`](figures/).
+
+---
+
+## Licencia
+
+Código publicado con fines académicos. Libre para uso educativo y experimental.

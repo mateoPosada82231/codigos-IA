@@ -1,23 +1,22 @@
 """
-control_maestro_rl.py
+maestro.py
 =====================
 Orquestador interactivo para los algoritmos de Aprendizaje por Refuerzo:
 
   1. Menú para elegir qué controlador ejecutar en el ESP32:
-       1. Q-learning tabular  (aprendizaje1.py)
-       2. DQN levitador       (dqn_levitador_esp32.py)
-       3. DQN tres sensores   (dqn_esp32.py)
+   1. Menú para elegir qué controlador ejecutar en el ESP32:
+       1. Q-learning tabular  (qlearning_esp32.py)
+       2. DQN levitador       (dqn_esp32.py)
 
   2. Pide setpoint y parámetros en el PC, sube archivo sin input() al ESP32.
   3. Abre mini-terminal serie (pyserial): muestra output y envía Ctrl+C.
   4. Al terminar pregunta si re-entrenar:
        - Q-learning: recarga qtable.json del ESP32 (no re-entrena en PC).
-       - DQN levitador: re-entrena dqn_levitador.py en PC y exporta pesos.
-       - DQN 3 sensores: re-entrena dqn_levitador.py / exportar en PC.
+       - DQN levitador: re-entrena dqn_train.py en PC y exporta pesos.
   5. Inyecta nuevos pesos y pregunta si ejecutar de nuevo.
 
 Uso:
-    python control_maestro_rl.py
+    python maestro.py
 """
 
 import os
@@ -32,16 +31,16 @@ import subprocess
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 CONTROLADORES = {
-    "qlearning": os.path.join(SCRIPT_DIR, "aprendizaje1.py"),
-    "dqn":       os.path.join(SCRIPT_DIR, "dqn_levitador_esp32.py"),
+    "qlearning": os.path.join(SCRIPT_DIR, "qlearning_esp32.py"),
+    "dqn":       os.path.join(SCRIPT_DIR, "dqn_esp32.py"),
 }
 
 ENTRENADORES = {
-    "dqn": os.path.join(SCRIPT_DIR, "dqn_levitador.py"),
+    "dqn": os.path.join(SCRIPT_DIR, "dqn_train.py"),
 }
 
 EXPORTADORES = {
-    "dqn": os.path.join(SCRIPT_DIR, "exportar_pesos_dqn_levitador.py"),
+    "dqn": os.path.join(SCRIPT_DIR, "export_dqn_weights.py"),
 }
 
 CSV_NOMBRES = {
@@ -50,7 +49,7 @@ CSV_NOMBRES = {
 }
 
 PESOS_ARCHIVOS = {
-    "dqn":  os.path.join(SCRIPT_DIR, "pesos_dqn_levitador.py"),
+    "dqn":  os.path.join(SCRIPT_DIR, "dqn_weights.py"),
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -132,37 +131,37 @@ def _preparar_archivo(modo: str, setpoint: float,
                 lineas[fin].strip() == ""
             ):
                 fin += 1
-            salida.append(f"SETPOINT = {setpoint:.2f}  # fijado desde control_maestro_rl.py\n")
+            salida.append(f"SETPOINT = {setpoint:.2f}  # fijado desde maestro.py\n")
             i = fin
             continue
 
         # Reemplazar asignación directa de SETPOINT si no viene de input
         if re.match(r'\s*SETPOINT\s*=\s*[\d.]+', linea) and "input" not in linea:
-            salida.append(f"SETPOINT = {setpoint:.2f}  # fijado desde control_maestro_rl.py\n")
+            salida.append(f"SETPOINT = {setpoint:.2f}  # fijado desde maestro.py\n")
             i += 1
             continue
 
         # Inyectar EPSILON (solo Q-learning)
         if epsilon is not None and re.match(r'\s*EPSILON\s*=\s*[\d.]+', linea):
-            salida.append(f"EPSILON = {epsilon:.2f}  # fijado desde control_maestro_rl.py\n")
+            salida.append(f"EPSILON = {epsilon:.2f}  # fijado desde maestro.py\n")
             i += 1
             continue
 
         # Inyectar ALPHA (solo Q-learning modo ejecución: sin aprendizaje)
         if alpha is not None and re.match(r'\s*ALPHA\s*=\s*[\d.]+', linea):
-            salida.append(f"ALPHA = {alpha:.4f}  # fijado desde control_maestro_rl.py\n")
+            salida.append(f"ALPHA = {alpha:.4f}  # fijado desde maestro.py\n")
             i += 1
             continue
 
         # Congelar epsilon cuando se inyecta explícitamente
         if epsilon is not None and re.match(r'\s*EPSILON_FIXED\s*=\s*(True|False)', linea):
-            salida.append(f"EPSILON_FIXED = True  # fijado desde control_maestro_rl.py\n")
+            salida.append(f"EPSILON_FIXED = True  # fijado desde maestro.py\n")
             i += 1
             continue
 
         # Guardado automático del CSV (respuesta 's')
         if "resp" in linea and "input(" in linea and "strip().lower()" in linea:
-            salida.append("    resp = 's'  # guardado automático desde control_maestro_rl.py\n")
+            salida.append("    resp = 's'  # guardado automático desde maestro.py\n")
             i += 1
             continue
 
@@ -250,8 +249,8 @@ def ejecutar_en_esp32(modo: str, setpoint: float,
         if not os.path.isfile(pesos_local):
             print(f"[ERROR] No se encontró {os.path.basename(pesos_local)}. Ejecuta el exportador primero.")
             return -1
-        print(f"\n  Subiendo pesos DQN → pesos_dqn_levitador.py en {puerto}...")
-        cmd_pesos = ["ampy", "--port", puerto, "put", pesos_local, "pesos_dqn_levitador.py"]
+        print(f"\n  Subiendo pesos DQN → dqn_weights.py en {puerto}...")
+        cmd_pesos = ["ampy", "--port", puerto, "put", pesos_local, "dqn_weights.py"]
         try:
             res_p = subprocess.run(cmd_pesos, check=False, capture_output=True, text=True)
             if res_p.returncode != 0:
@@ -386,8 +385,8 @@ def subir_qtable():
 
 def reentrenar_dqn():
     """
-    Ejecuta dqn_levitador.py en PC (re-entrenamiento) y luego
-    exportar_pesos_dqn_levitador.py para actualizar pesos_dqn_levitador.py.
+    Ejecuta dqn_train.py en PC (re-entrenamiento) y luego
+    export_dqn_weights.py para actualizar dqn_weights.py.
     """
     entrenador = ENTRENADORES["dqn"]
     exportador = EXPORTADORES["dqn"]
@@ -405,7 +404,7 @@ def reentrenar_dqn():
         print(f"[ERROR] No se pudo ejecutar el entrenador: {e}")
         return False
 
-    # Exportar pesos (el exportador escribe directamente en pesos_dqn_levitador.py)
+    # Exportar pesos (el exportador escribe directamente en dqn_weights.py)
     if os.path.isfile(exportador):
         print(f"\n  Exportando pesos con {os.path.basename(exportador)}...")
         try:
@@ -527,8 +526,8 @@ def _mostrar_menu():
     print("  CONTROL MAESTRO — Aprendizaje por Refuerzo  (Levitador)")
     print("═"*60)
     print("  Selecciona el controlador que deseas ejecutar en el ESP32:\n")
-    print("    1. Q-learning tabular    (aprendizaje1.py)")
-    print("    2. DQN levitador         (dqn_levitador_esp32.py)")
+    print("    1. Q-learning tabular    (qlearning_esp32.py)")
+    print("    2. DQN levitador         (dqn_esp32.py)")
     print("    0. Salir")
     print("─"*60)
 

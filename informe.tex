@@ -46,11 +46,11 @@
 en un Tubo de Acrílico Usando un Microcontrolador ESP32}
 
 \author{
-    \IEEEauthorblockN{Mateo Posada}
+    \IEEEauthorblockN{Mateo Posada, Carlos Calderon, Joseph Rincon}
     \IEEEauthorblockA{
-        Departamento de Ingeniería Electrónica\\
-        Laboratorio de Inteligencia Artificial\\
-        Abril 2026
+        Politecnico Colombiano Jaime Isaza Cadavid\\
+        Asignatura de Inteligencia Artificial\\
+        Junio 2026
     }
 }
 
@@ -58,7 +58,7 @@ en un Tubo de Acrílico Usando un Microcontrolador ESP32}
 
 % ─────────────────────────────────────────────────────────────────────────────
 \begin{abstract}
-Este artículo presenta el diseño e implementación de tres estrategias de control inteligente para estabilizar una pelota liviana dentro de un tubo de acrílico vertical. El sistema, basado en un microcontrolador ESP32 programado en MicroPython, utiliza un sensor ultrasónico HC-SR04 como realimentación de posición y un ventilador DC controlado por PWM como actuador. Se implementaron: (i) un controlador difuso PD+I con matriz FAM de $9\times7$ y tres métodos de defuzzificación; (ii) una red neuronal feedforward FCLayer(3$\to$16$\to$12$\to$8$\to$1) entrenada en PC y desplegada en el ESP32, comparando las funciones de activación sigmoide, tanh y ReLU; y (iii) dos estrategias de aprendizaje por refuerzo para el mismo problema de levitación: un Q-Learning tabular de $11\times6$ ejecutado íntegramente en el ESP32, y una Deep Q-Network (DQN) con arquitectura 2$\to$24$\to$24$\to$6, entrenada en PC sobre un simulador 1D del tubo e inferida en el ESP32 a 20\,Hz, que incorpora la velocidad estimada como entrada y mejora la política del baseline tabular. Adicionalmente se incluye un ejemplo académico de DQN con tres sensores que ilustra la flexibilidad del marco. El artículo describe el proyecto, los algoritmos y las variaciones de configuración de cada técnica.
+Este artículo presenta el diseño e implementación de tres estrategias de control inteligente para estabilizar una pelota liviana dentro de un tubo de acrílico vertical. El sistema, basado en un microcontrolador ESP32 programado en MicroPython, utiliza un sensor ultrasónico HC-SR04 como realimentación de posición y un ventilador DC controlado por PWM como actuador. Se implementaron: (i) un controlador difuso PD+I con matriz FAM de $9\times7$ y tres métodos de defuzzificación; (ii) una red neuronal feedforward FCLayer(3$\to$16$\to$12$\to$8$\to$1) entrenada en PC y desplegada en el ESP32, comparando las funciones de activación sigmoide, tanh y ReLU; y (iii) dos estrategias de aprendizaje por refuerzo para el mismo problema de levitación: un Q-Learning tabular de $11\times6$ ejecutado íntegramente en el ESP32, y una Deep Q-Network (DQN) con arquitectura 2$\to$24$\to$24$\to$6, entrenada en PC sobre un simulador 1D del tubo e inferida en el ESP32 a 20\,Hz, que incorpora la velocidad estimada como entrada y mejora la política del baseline tabular. Adicionalmente se implementó un sistema de consulta basado en Retrieval-Augmented Generation (RAG) que permite interrogar el informe y el código fuente del proyecto en lenguaje natural usando Ollama. El artículo describe el proyecto, los algoritmos, las variaciones de configuración de cada técnica y las herramientas de documentación asistida.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -77,6 +77,11 @@ Este trabajo implementa y compara las tres estrategias sobre un ESP32, evaluando
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Descripción General del Proyecto}
+
+El repositorio se organiza en cuatro módulos principales, cada uno correspondiente a una tecnología de control más una herramienta de documentación asistida. Cada módulo contiene variantes de configuración que se comparan entre sí. La Fig.\,\ref{fig:estructura} presenta la estructura del repositorio.
+
+Adicionalmente, se implementó un sistema de consulta basado en Retrieval-Augmented Generation (RAG) que indexa el informe \LaTeX{} y los archivos de código fuente del proyecto en una base de datos vectorial ChromaDB, utilizando \texttt{nomic-embed-text} para generación de embeddings y \texttt{llama3.2} como modelo de lenguaje a través de Ollama. Esto permite realizar preguntas en lenguaje natural sobre el proyecto, como consultas sobre resultados experimentales, descripción de algoritmos o comparación de métricas.
+
 \subsection{Configuración del Hardware}
 
 La plataforma experimental consiste en un tubo de acrílico transparente (40\,cm de altura, aproximadamente 5\,cm de diámetro interior) montado verticalmente sobre una base impresa en 3D. Un ventilador DC sin escobillas ubicado en la base genera una columna de flujo de aire ascendente. Una pelota de icopor de 0.5\,g es colocada dentro del tubo y puede moverse libremente en dirección axial. Un sensor ultrasónico HC-SR04 posicionado en la parte superior del tubo emite pulsos hacia abajo para medir la distancia hasta la pelota. La Tabla\,\ref{tab:hardware} resume los componentes de hardware y su conexión al ESP32.
@@ -101,7 +106,7 @@ Pelota            & Icopor, 0.5\,g              & ---               \\
 % ─────────────────────────────────────────────────────────────────────────────
 \begin{figure}[!t]
     \centering
-    \includegraphics[width=0.9\columnwidth]{esquema_montaje.png}
+    \includegraphics[width=0.9\columnwidth]{figures/assembly_diagram.png}
     \caption{Montaje físico completo: tubo de acrílico, ventilador en la base, sensor ultrasónico en la parte superior y ESP32 como unidad de control.}
     \label{fig:montaje}
 \end{figure}
@@ -126,7 +131,7 @@ Para facilitar la interpretación de las reglas difusas, el tubo se divide en zo
 
 \begin{figure}[!t]
     \centering
-    \includegraphics[width=0.82\columnwidth]{grafico-tubo.jpg}
+    \includegraphics[width=0.82\columnwidth]{figures/tube_diagram.jpg}
     \caption{Zonas difusas del tubo de acrílico. Cada banda de color corresponde a un nivel lingüístico de error. La línea punteada azul marca el setpoint en 15\,cm.}
     \label{fig:tubo}
 \end{figure}
@@ -138,17 +143,49 @@ El proyecto se organiza en tres módulos principales, cada uno correspondiente a
 
 \begin{figure}[!t]
     \centering
-    \includegraphics[width=0.9\columnwidth]{estructura_repo.png}
+    \includegraphics[width=0.9\columnwidth]{figures/repo_structure.png}
     \caption{Estructura de carpetas del repositorio con los tres módulos principales y sus variantes de configuración.}
     \label{fig:estructura}
 \end{figure}
 
 % ─────────────────────────────────────────────────────────────────────────────
 \begin{itemize}
-    \item \texttt{logica\_difusa/} --- Controladores fuzzy PD+I con tres métodos de defuzzificación: \texttt{levitacion\_fuzzy\_centroide.py}, \texttt{levitacion\_fuzzy\_bisector.py} y \texttt{levitacion\_fuzzy\_mom.py}.
-    \item \texttt{redes\_neuronales/} --- Red neuronal FCLayer(3$\to$16$\to$12$\to$8$\to$1) entrenada en PC e inferida en ESP32 con tres funciones de activación: \texttt{levitacion\_red\_neuronal\_sigmoid.py}, \texttt{levitacion\_red\_neuronal\_tanh.py} y \texttt{levitacion\_red\_neuronal\_relu.py}.
-    \item \texttt{aprendizaje\_refuerzo/} --- Q-Learning tabular de $11\times6$ ejecutado en el ESP32 (\texttt{aprendizaje1.py}) y DQN de 2$\to$24$\to$24$\to$6 entrenada en PC sobre un simulador 1D del levitador e inferida en el ESP32 (\texttt{dqn\_levitador.py} + \texttt{dqn\_levitador\_esp32.py} + \texttt{exportar\_pesos\_dqn\_levitador.py}). Como ejemplo académico adicional, se conserva una DQN para navegación con tres sensores (\texttt{dqn\_tres\_sensores.py} + \texttt{dqn\_esp32.py}) que no aplica al levitador.
+    \item \texttt{fuzzy/} --- Controladores fuzzy PD+I con tres métodos de defuzzificación: \texttt{controller\_centroid.py}, \texttt{controller\_bisector.py} y \texttt{controller\_mom.py}.
+    \item \texttt{neural\_networks/} --- Red neuronal FCLayer(3$\to$16$\to$12$\to$8$\to$1) entrenada en PC e inferida en ESP32 con tres funciones de activación: \texttt{controller\_sigmoid.py}, \texttt{controller\_tanh.py} y \texttt{controller\_relu.py}.
+    \item \texttt{reinforcement\_learning/} --- Q-Learning tabular de $11\times6$ ejecutado en el ESP32 (\texttt{qlearning\_esp32.py}) y DQN de 2$\to$24$\to$24$\to$6 entrenada en PC sobre un simulador 1D del levitador e inferida en el ESP32 (\texttt{dqn\_train.py} + \texttt{dqn\_esp32.py} + \texttt{export\_dqn\_weights.py}).
+    \item \texttt{llm/} --- Sistema RAG (Retrieval-Augmented Generation) que permite consultar el informe y el código en lenguaje natural usando Ollama (\texttt{rag.py}).
 \end{itemize}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\subsection{Sistema de Consulta RAG}
+
+El módulo \texttt{llm/} implementa un sistema de Retrieval-Augmented Generation (RAG) que permite realizar consultas en lenguaje natural sobre el proyecto. Este sistema combina un modelo de lenguaje de gran escala (LLM) con una base de datos vectorial que indexa la documentación y el código fuente, permitiendo respuestas contextualizadas sin necesidad de reentrenamiento.
+
+\subsubsection{Arquitectura}
+
+El proceso consta de tres etapas:
+
+\begin{enumerate}
+    \item \textbf{Indexación:} El script \texttt{rag.py} procesa el archivo \texttt{informe.tex} extrayendo el texto plano de cada sección, y analiza los archivos \texttt{.py} del proyecto extrayendo funciones y clases individuales. Cada fragmento se convierte en un vector de embedding mediante \texttt{nomic-embed-text} (dimensionalidad 768) y se almacena en una base de datos vectorial ChromaDB junto con metadatos que indican su origen (sección del informe o archivo y línea de código).
+    
+    \item \textbf{Consultas:} El usuario formula una pregunta en lenguaje natural, por ejemplo ``¿cuál es el algoritmo que mejor funciona?''. La pregunta se transforma en un embedding con el mismo modelo y se buscan los $k$ fragmentos más similares en ChromaDB mediante búsqueda por similitud coseno.
+    
+    \item \textbf{Generación:} Los fragmentos recuperados se concatenan como contexto y se envían al LLM \texttt{llama3.2} a través de Ollama, que genera una respuesta en lenguaje natural fundamentada en la documentación real del proyecto.
+\end{enumerate}
+
+\subsubsection{Uso}
+
+El sistema se ejecuta desde la terminal:
+
+\begin{lstlisting}[style=pythonstyle]
+python rag.py "¿cuál es el error promedio del controlador Centroide?"
+\end{lstlisting}
+
+Opcionalmente se puede forzar la reconstrucción del índice con la bandera \texttt{--rebuild}. Las dependencias necesarias son \texttt{ollama}, \texttt{chromadb}, \texttt{langchain} y sus extensiones.
+
+\subsubsection{Ventajas}
+
+Este enfoque permite que un investigador o usuario del proyecto obtenga respuestas precisas sobre cualquier aspecto del sistema —desde métricas experimentales hasta detalles de implementación— sin tener que leer manualmente el informe completo o navegar la estructura de directorios. La base de datos vectorial se persiste en disco, por lo que la indexación se realiza una sola vez y las consultas posteriores son inmediatas.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Control por Lógica Difusa}
@@ -165,14 +202,14 @@ Nueve funciones trapezoidales particionan el universo de discurso del error, y s
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=\columnwidth]{error-fuzzy.jpg}
+    \includegraphics[width=\columnwidth]{figures/fuzzy_error_mf.jpg}
     \caption{Funciones de pertenencia del error (9 niveles trapezoidales, de NV a PV).}
     \label{fig:error-mf}
 \end{figure}
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=\columnwidth]{error-derivate-fuzzy.jpg}
+    \includegraphics[width=\columnwidth]{figures/fuzzy_derivative_mf.jpg}
     \caption{Funciones de pertenencia de la derivada del error (7 niveles trapezoidales).}
     \label{fig:deriv-mf}
 \end{figure}
@@ -184,7 +221,7 @@ La inferencia utiliza una matriz FAM cuyos valores son incrementos de PWM nítid
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=\columnwidth]{fuzzy-rules.jpg}
+    \includegraphics[width=\columnwidth]{figures/fuzzy_rules.jpg}
     \caption{Matriz de reglas difusas FAM (mapa de calor). Las filas corresponden a niveles de error (NV–PV) y las columnas a niveles de derivada. Los colores cálidos indican incrementos negativos de PWM (frenado) y los fríos incrementos positivos (aceleración).}
     \label{fig:fam}
 \end{figure}
@@ -229,7 +266,7 @@ Se diseñó una red neuronal completamente conectada con arquitectura FCLayer(3$
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.95\columnwidth]{arquitectura_rn.png}
+    \includegraphics[width=0.95\columnwidth]{figures/nn_architecture.png}
     \caption{Arquitectura de la red neuronal: 3 entradas $\to$ 16 neuronas $\to$ 12 neuronas $\to$ 8 neuronas $\to$ 1 salida. Tres capas ocultas con función de activación configurable y salida lineal.}
     \label{fig:arquitectura-rn}
 \end{figure}
@@ -270,14 +307,14 @@ El aprendizaje por refuerzo aborda el problema desde una perspectiva diferente a
 % ─────────────────────────────────────────────────────────────────────────────
 \subsection{Q-Learning Clásico en ESP32}
 
-El archivo \texttt{aprendizaje1.py} implementa Q-Learning que se ejecuta completamente en el ESP32. El espacio de estados se discretiza en 11 posiciones (10 a 20\,cm) y el espacio de acciones en 6 valores de PWM (200 a 600). El algoritmo utiliza la política $\epsilon$-greedy con decaimiento gradual de $\epsilon$ desde 0.20 hasta 1.0, tasa de aprendizaje $\alpha = 0.10$ y factor de descuento $\gamma = 0.90$.
+El archivo \texttt{qlearning\_esp32.py} implementa Q-Learning que se ejecuta completamente en el ESP32. El espacio de estados se discretiza en 11 posiciones (10 a 20\,cm) y el espacio de acciones en 6 valores de PWM (200 a 600). El algoritmo utiliza la política $\epsilon$-greedy con aumento gradual de $\epsilon$ desde 0.20 hasta 1.0 (incrementando 0.20 cada 100 pasos), tasa de aprendizaje $\alpha = 0.10$ y factor de descuento $\gamma = 0.90$.
 
 La función de recompensa es $R = -|dist - setpoint|$, penalizando el alejamiento del punto de consigna (fijado en 15\,cm). La tabla Q se persiste en el sistema de archivos del ESP32 como \texttt{qtable.json}, permitiendo continuar el aprendizaje entre reinicios. El algoritmo ejecuta 800 pasos por sesión, guardando la tabla cada 100 pasos. La medición de distancia combina mediana de 3 muestras con filtro EMA ($\alpha = 0.3$).
 
 % ─────────────────────────────────────────────────────────────────────────────
 \subsection{Deep Q-Network (DQN) para el Levitador}
 
-El archivo \texttt{dqn\_levitador.py} implementa un simulador 1D del tubo (\texttt{LevitadorEnv}) y entrena dos agentes sobre él: (i) un Q-Learning tabular en el mismo espacio $11\times6$ usado por \texttt{aprendizaje1.py}, que sirve como línea base, y (ii) una DQN con estado continuo, que es la que finalmente se exporta al ESP32.
+El archivo \texttt{dqn\_train.py} implementa un simulador 1D del tubo (\texttt{LevitadorEnv}) y entrena dos agentes sobre él: (i) un Q-Learning tabular en el mismo espacio $11\times6$ usado por \texttt{qlearning\_esp32.py}, que sirve como línea base, y (ii) una DQN con estado continuo, que es la que finalmente se exporta al ESP32.
 
 \subsubsection{Simulador 1D del tubo}
 
@@ -309,15 +346,11 @@ El agente se entrena con los ingredientes clásicos de DQN:
 
 \subsubsection{Inferencia en el ESP32}
 
-El script \texttt{dqn\_levitador\_esp32.py} implementa el forward pass manual de la red (producto matriz-vector + ReLU) sobre los mismos 6\,KB de pesos exportados a \texttt{pesos\_dqn\_levitador.py}. El estado se construye a partir de una lectura mediana de 3 muestras del HC-SR04, filtrada con un EMA ($\alpha = 0.40$), y de la velocidad estimada por diferenciación numérica suavizada con un EMA. El lazo corre a 20\,Hz sobre el mismo hardware del proyecto (TRIG 27 / ECHO 26, ventilador en GPIO 14, PWM 25\,kHz).
+El script \texttt{dqn\_esp32.py} implementa el forward pass manual de la red (producto matriz-vector + ReLU) sobre los mismos 6\,KB de pesos exportados a \texttt{dqn\_weights.py}. El estado se construye a partir de una lectura mediana de 3 muestras del HC-SR04, filtrada con un EMA ($\alpha = 0.40$), y de la velocidad estimada por diferenciación numérica suavizada con un EMA. El lazo corre a 20\,Hz sobre el mismo hardware del proyecto (TRIG 27 / ECHO 26, ventilador en GPIO 14, PWM 25\,kHz).
 
 \subsubsection{Comparación con la tabla Q}
 
 Tras entrenar ambos agentes en el simulador, se evalúan sus políticas greedy sobre 200 episodios nuevos partiendo de posiciones iniciales aleatorias en $[12,\,18]$\,cm. La Tabla~\ref{tab:rl-comparacion} resume los resultados. La DQN reduce el error medio de $\sim$0.9\,cm a $\sim$0.2\,cm y aumenta la fracción de tiempo dentro de $\pm1$\,cm de $\sim$55\,\% a $\sim$99\,\%. La ventaja se atribuye a que la DQN (a) generaliza entre estados vecinos al usar posición continua, (b) incorpora la velocidad y por tanto anticipa la tendencia de la pelota, y (c) puede aproximar la política óptima de PWM, en contraste con el control bang-bang que produce el agente tabular.
-
-\subsubsection{Ejemplo adicional: DQN con tres sensores}
-
-Como complemento académico, se conserva un ejemplo de DQN con tres sensores ultrasónicos (\texttt{dqn\_tres\_sensores.py} + \texttt{dqn\_esp32.py}) que resuelve un problema distinto de navegación con cinco acciones (avanzar, retroceder, girar izquierda, girar derecha, mantener). Este ejemplo no aplica al levitador de un sensor; se incluye únicamente para ilustrar la flexibilidad del marco DQN sobre un espacio de observación de mayor dimensionalidad.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \subsection{Variaciones: Q-Learning vs DQN (en el levitador)}
@@ -335,7 +368,7 @@ Representación         & Tabla $11\times6$   & Red 2$\to$24$\to$24$\to$6 ($\sim
 Estado                 & Posici\'on discreta & Posici\'on y velocidad continuas \\
 Sensores               & 1 (HC-SR04)         & 1 (HC-SR04) \\
 Acciones               & 6 valores PWM       & 6 valores PWM \\
-Persistencia           & \texttt{qtable.json}& \texttt{pesos\_dqn\_levitador.py} \\
+Persistencia           & \texttt{qtable.json}& \texttt{dqn\_weights.py} \\
 Error medio (sim)      & $\sim$0.9\,cm       & $\sim$0.2\,cm \\
 $\pm1$\,cm del setpoint& $\sim$55\,\%        & $\sim$99\,\% \\
 Librerías              & Solo stdlib         & PC: torch + numpy; ESP32: stdlib pura \\
@@ -376,7 +409,7 @@ Q-Learning & 1.92 mm & 1.58 mm & 11.78 mm \\
 Los controladores basados en lógica difusa mostraron un comportamiento estable y consistente durante las pruebas realizadas. Entre las tres variantes evaluadas, el método de defuzzificación por Centroide obtuvo el menor error promedio (1.89 mm) y la menor desviación estándar (1.45 mm), superando a las variantes Bisector y MOM. Estos resultados evidencian una buena capacidad de seguimiento del punto de consigna y una respuesta robusta frente a las perturbaciones presentes en el sistema.
 \begin{figure}[H]
 \centering
-\includegraphics[width=\columnwidth]{Category_Fuzzy_Logic.png}
+\includegraphics[width=\columnwidth]{figures/category_fuzzy_logic.png}
 \caption{Comparación del desempeño de los controladores de lógica difusa: Bisector, Centroide y MOM.}
 \label{fig:fuzzy}
 \end{figure}
@@ -386,7 +419,7 @@ Los controladores basados en lógica difusa mostraron un comportamiento estable 
 Las redes neuronales lograron controlar satisfactoriamente el sistema, aunque presentaron errores promedio superiores a los obtenidos mediante lógica difusa y aprendizaje por refuerzo. La función de activación Tanh obtuvo el mejor desempeño dentro de esta categoría con un error promedio de 2.56 mm, seguida por Sigmoid (2.78 mm) y ReLU (3.45 mm). Asimismo, estas variantes presentaron una mayor dispersión en sus resultados, reflejada en desviaciones estándar más elevadas.
 \begin{figure}[H]
 \centering
-\includegraphics[width=\columnwidth]{Category_Neural_Networks.png}
+\includegraphics[width=\columnwidth]{figures/category_neural_networks.png}
 \caption{Respuesta del sistema utilizando redes neuronales con funciones de activación ReLU, Sigmoid y Tanh.}
 \label{fig:redes}
 \end{figure}
@@ -396,10 +429,26 @@ Las redes neuronales lograron controlar satisfactoriamente el sistema, aunque pr
 Los métodos basados en aprendizaje por refuerzo obtuvieron los menores errores promedio dentro del conjunto de pruebas realizadas. DQN alcanzó el mejor resultado global con un error promedio de 1.67 mm y la menor desviación estándar observada (1.23 mm), mientras que Q-Learning obtuvo un error promedio de 1.92 mm. Estos resultados sugieren una buena capacidad de adaptación del agente al comportamiento dinámico del sistema de levitación.
 \begin{figure}[H]
 \centering
-\includegraphics[width=\columnwidth]{Category_Reinforcement_Learning.png}
+\includegraphics[width=\columnwidth]{figures/category_reinforcement_learning.png}
 \caption{Comparación de los métodos de aprendizaje por refuerzo DQN y Q-Learning durante el seguimiento de la referencia.}
 \label{fig:rl}
 \end{figure}
+
+\subsection{Fuentes de Error e Inestabilidad}
+
+A pesar de los resultados obtenidos, el sistema presenta diversas fuentes de error e inestabilidad que afectan el desempeño de todos los controladores implementados:
+
+\begin{itemize}
+    \item \textbf{Asimetría de la pelota:} La pelota de icopor utilizada no es perfectamente esférica, lo que introduce variaciones en el coeficiente aerodinámico dependiendo de su orientación al girar dentro del flujo de aire. Esta asimetría genera perturbaciones laterales impredecibles que se traducen en oscilaciones de la altura medida, visibles incluso en estado estacionario. El efecto es más notorio en los controladores con ganancia alta (ReLU, MOM), ya que amplifican estas perturbaciones en la acción de control.
+    
+    \item \textbf{No linealidades aerodinámicas:} La relación entre el PWM aplicado al ventilador y la fuerza de sustentación sobre la pelota no es lineal. Existen zonas de histéresis y efectos de pared dentro del tubo que modifican el flujo de aire en posiciones cercanas a los extremos.
+    
+    \item \textbf{Ruido del sensor ultrasónico:} El HC-SR04 presenta una resolución limitada ($\sim$3\,mm) y lecturas espurias ocasionales causadas por reflexiones múltiples dentro del tubo, especialmente cuando la pelota está cerca del sensor. Los filtros de mediana y EMA mitigan parcialmente este ruido, pero introducen un retardo de fase que reduce el margen de estabilidad.
+    
+    \item \textbf{Ruido de cuantificación del PWM:} La resolución de 10 bits del ESP32 para la generación PWM introduce un escalón mínimo de $\sim$0.1\,\% del ciclo de trabajo, que sumado a la inercia térmica del ventilador genera un rizo residual en la posición de equilibrio.
+\end{itemize}
+
+Estas fuentes de error explican en parte por qué los errores promedio experimentales (1.67 -- 3.45 mm) superan las simulaciones numéricas del entorno DQN ($\sim$0.2\,cm), y constituyen limitaciones físicas inherentes al banco de pruebas que deben considerarse al interpretar los resultados.
 
 \section{Conclusiones}
 
@@ -408,14 +457,11 @@ Los métodos basados en aprendizaje por refuerzo obtuvieron los menores errores 
 \begin{enumerate}
 \item Los métodos de aprendizaje por refuerzo obtuvieron los menores errores promedio dentro de las pruebas realizadas, destacándose especialmente la estrategia DQN con un error promedio de 1.67 mm.
 
-```
 \item Los controladores basados en lógica difusa demostraron un comportamiento robusto y consistente. En particular, el método Centroide alcanzó resultados muy cercanos a los obtenidos por los algoritmos de aprendizaje por refuerzo, manteniendo además una baja variabilidad en la respuesta.
 
 \item Las redes neuronales fueron capaces de controlar el sistema de manera satisfactoria; sin embargo, presentaron errores promedio y desviaciones estándar superiores a los observados en los métodos fuzzy y de aprendizaje por refuerzo.
 
 \item Los resultados obtenidos evidencian que diferentes estrategias de control inteligente pueden implementarse exitosamente sobre plataformas de recursos limitados como el ESP32, manteniendo niveles adecuados de precisión para aplicaciones de control en tiempo real.
-```
-
 \end{enumerate}
 
 \begin{thebibliography}{9}

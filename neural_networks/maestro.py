@@ -1,5 +1,5 @@
 """
-control_maestro.py
+maestro.py
 ==================
 Orquestador interactivo para el flujo completo de redes neuronales:
 
@@ -14,7 +14,7 @@ Orquestador interactivo para el flujo completo de redes neuronales:
   5. Vuelve a preguntar si desea ejecutar de nuevo y repite el ciclo.
 
 Uso:
-    python control_maestro.py
+    python maestro.py
 """
 
 import os
@@ -38,9 +38,9 @@ SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
 PESOS_JSON   = os.path.join(SCRIPT_DIR, "pesos_red_levitador.json")
 
 CONTROLADORES = {
-    "sigmoid": os.path.join(SCRIPT_DIR, "levitacion_red_neuronal_sigmoid.py"),
-    "relu":    os.path.join(SCRIPT_DIR, "levitacion_red_neuronal_relu.py"),
-    "tanh":    os.path.join(SCRIPT_DIR, "levitacion_red_neuronal_tanh.py"),
+    "sigmoid": os.path.join(SCRIPT_DIR, "controller_sigmoid.py"),
+    "relu":    os.path.join(SCRIPT_DIR, "controller_relu.py"),
+    "tanh":    os.path.join(SCRIPT_DIR, "controller_tanh.py"),
 }
 
 # Nombre del CSV que cada controlador guarda en el ESP32
@@ -563,7 +563,7 @@ def _preparar_archivo_esp32(activacion: str, setpoint: float) -> str:
                                           lineas[fin].strip().startswith("except") or
                                           lineas[fin].strip() == ""):
                 fin += 1
-            salida.append(f"setpoint = {setpoint:.2f}  # fijado desde control_maestro.py\n")
+            salida.append(f"setpoint = {setpoint:.2f}  # fijado desde maestro.py\n")
             i = fin
             continue
 
@@ -571,7 +571,7 @@ def _preparar_archivo_esp32(activacion: str, setpoint: float) -> str:
         # Detecta:  resp = input("Guardar ... (s/n): ").strip().lower()
         if "resp" in linea and "input(" in linea and "strip().lower()" in linea:
             # Reemplazar por condición siempre verdadera
-            salida.append("    resp = 's'  # guardado automático desde control_maestro.py\n")
+            salida.append("    resp = 's'  # guardado automático desde maestro.py\n")
             i += 1
             continue
 
